@@ -33,7 +33,7 @@ if (!tableName) {
   try {
     console.log(`\n🔍  Viewing Table: ${tableName}`);
     
-    const rows = db.prepare(`SELECT email, password, firstName, lastName, createdAt FROM ${tableName}`).all();
+    const rows = db.prepare(`SELECT id, firstName, googleId, password, createdAt FROM ${tableName}`).all();
     
     if (rows.length === 0) {
       console.log('⚠️  Table is empty.');
