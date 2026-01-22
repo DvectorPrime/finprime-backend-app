@@ -4,6 +4,7 @@ import cors from 'cors';
 import session from "express-session"
 
 import { authRouter } from './routes/authRouter.js';
+import { transactionsRouter } from './routes/transactionsRouter.js';
 
 dotenv.config();
 
@@ -33,6 +34,7 @@ app.use(express.urlencoded({ extended: true }));
 
 // Routes
 app.use('/auth', authRouter)
+app.use('/transactions', transactionsRouter)
 
 app.use((err, req, res, next) => {
   console.error(err.stack);

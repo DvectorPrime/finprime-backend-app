@@ -32,25 +32,30 @@ export async function login(req, res) {
         return res.status(400).json({error : "Invalid Email Address"})
     }
 
-    const idStmt = db.prepare('SELECT id, password AS hash FROM users WHERE email = ?')
-
-    const data = idStmt.get(email) || {id : null, hash : null}
-
-    if (!data){
-        return res.status(400).json({error : "USER not in database"})
+    try {
+        const idStmt = db.prepare('SELECT id, password AS hash FROM users WHERE email = ?')
+    
+        const data = idStmt.get(email) || {id : null, hash : null}
+    
+        if (!data){
+            return res.status(400).json({error : "USER not in database"})
+        }
+    
+        const isPasswordValid = await bcrypt.compare(password, data.hash)
+    
+        if (!isPasswordValid){
+            return res.status(400).json({error : "Incorrect Password"})
+        }
+    
+        req.session.userId = data.id
+    
+        console.log(req.session.userId)
+    
+        res.json({message: "Login Succesful"})
+    } catch (err) {
+        return res.status(500).json({error: "An error occcured"})
     }
 
-    const isPasswordValid = await bcrypt.compare(password, data.hash)
-
-    if (!isPasswordValid){
-        return res.status(400).json({error : "Incorrect Password"})
-    }
-
-    req.session.userId = data.id
-
-    console.log(req.session.userId)
-
-    res.json({message: "Login Succesful"})
 }
 
 export async function register(req, res){

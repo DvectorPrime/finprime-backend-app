@@ -25,6 +25,20 @@ function initDatabase() {
       );
     `);
 
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS transactions (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        userId INTEGER NOT NULL,
+        transactionName TEXT NOT NULL,
+        amount DECIMAL(10, 2) NOT NULL,
+        type TEXT CHECK(type IN ('INCOME', 'EXPENSE')) NOT NULL,
+        category TEXT NOT NULL,
+        notes TEXT,
+        createdAt DATETIME DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY(userId) REFERENCES users(id)
+      );
+    `);
+
     console.log('✅ Database initialized successfully!');
   } catch (err) {
     console.error('❌ Error initializing database:', err);
