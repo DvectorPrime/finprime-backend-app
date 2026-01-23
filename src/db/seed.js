@@ -84,13 +84,13 @@ async function seedDatabase() {
     console.log(`   -> Generating data for ${user.email} (ID: ${user.id})...`);
     
     // 1. Generate 5 Transactions for THIS Month
-    for (let i = 0; i < 8; i++) {
+    for (let i = 0; i < 40; i++) {
       createRandomTransaction(user.id, 'CURRENT_MONTH');
     }
 
     // 2. Generate 5 Transactions for LAST Month
     // (This ensures your dashboard has a "Previous Period" to compare against)
-    for (let i = 0; i < 8; i++) {
+    for (let i = 0; i < 40; i++) {
       createRandomTransaction(user.id, 'PREVIOUS_MONTH');
     }
   }

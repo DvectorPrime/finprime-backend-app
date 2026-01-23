@@ -106,19 +106,28 @@ export  function getDashboardStats(req, res) {
     } 
 }
 
-export async function getAllTransactions(req, res){
-    const userId = req.session.userId
+export async function getAllTransactions(req, res) {
+    const userId = req.session.userId;
+    const query = req.query;
 
-    const params = req.query
-
-    const page = params.page || 1
-    const recentOnly = params.recentOnly === 'true'
+    // Extract all potential filters
+    const filters = {
+        page: query.page || 1,
+        recentOnly: query.recentOnly === 'true',
+        
+        // New Filters
+        month: query.month,       // e.g., "0" for Jan, "11" for Dec
+        year: query.year,         // e.g., "2026"
+        type: query.type,         // "INCOME", "EXPENSE", or "all"
+        category: query.category, // e.g., "Food", "Salary" or "all"
+        search: query.search      // e.g., "Netflix"
+    };
 
     try {
-        const result = getTransactions(userId, page, recentOnly)
-
-        res.json(result)
-    } catch(err){
-        return res.status(500).json({error: "An Error Occured"})
+        const result = getTransactions(userId, filters);
+        res.json(result);
+    } catch (err) {
+        console.error("Get Transactions Error:", err);
+        return res.status(500).json({ error: "An Error Occured fetching transactions" });
     }
 }

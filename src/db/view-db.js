@@ -41,7 +41,8 @@ if (!tableName) {
         // Exclude password for cleaner view
         query = `SELECT id, email, firstName, googleId, createdAt FROM ${tableName}`;
     } else if (tableName === 'transactions') {
-        query = `SELECT id, userId, transactionName, amount, type, category, createdAt FROM ${tableName}`;
+        // query = `SELECT id, userId, transactionName, amount, type, category, createdAt FROM ${tableName}`;
+        query = `SELECT * FROM ${tableName}`;
     } else {
         // Fallback for other tables (select everything)
         query = `SELECT * FROM ${tableName}`;
