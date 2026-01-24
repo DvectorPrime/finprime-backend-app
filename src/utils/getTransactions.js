@@ -85,7 +85,6 @@ export function getTransactions(userId, filters) {
     
     const summaryResult = summaryStmt.get(...params);
 
-    // Query C: Get Actual Data (Paginated)
     const offset = (safePage - 1) * PAGE_SIZE;
     const finalParams = [...params, PAGE_SIZE, offset]; // Add Limit/Offset to end of params
 
@@ -101,7 +100,6 @@ export function getTransactions(userId, filters) {
 
     return {
         data: transactions,
-        // We include the totals at the top level so your UI can grab them easily
         summary: {
             totalIncome: summaryResult.totalIncome || 0,
             totalExpense: summaryResult.totalExpense || 0,

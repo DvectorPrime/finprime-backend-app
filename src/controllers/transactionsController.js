@@ -131,3 +131,53 @@ export async function getAllTransactions(req, res) {
         return res.status(500).json({ error: "An Error Occured fetching transactions" });
     }
 }
+
+export function createTransaction(req, res) {
+    const userId = req.session?.userId; 
+
+    if (!userId) {
+        return res.status(401).json({ error: "Unauthorized. Please log in." });
+    }
+
+    const { transactionName, amount, type, category, date, notes } = req.body;
+
+    if (!transactionName || !amount || !type || !category) {
+        return res.status(400).json({ error: "Please fill in all required fields." });
+    }
+
+    if (category === "All Categories" || category === "all") {
+        return res.status(400).json({ error: "Please select a valid category." });
+    }
+
+    const db = openDb();
+
+    try {
+        const finalDate = new Date(date).toISOString();
+        const finalType = type.toUpperCase(); 
+        const finalAmount = parseFloat(amount);
+
+        const stmt = db.prepare(`
+            INSERT INTO transactions (userId, transactionName, amount, type, category, notes, createdAt)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+        `);
+
+        const info = stmt.run(
+            userId,
+            transactionName,
+            finalAmount,
+            finalType,
+            category,
+            notes || "", 
+            finalDate
+        );
+
+        return res.status(201).json({ 
+            message: "Transaction added successfully", 
+            transactionId: info.lastInsertRowid 
+        });
+
+    } catch (err) {
+        console.log("Create Transaction Error:", err);
+        return res.status(500).json({ error: "Failed to save transaction." });
+    }
+}
