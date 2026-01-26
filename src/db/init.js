@@ -7,10 +7,10 @@ function initDatabase() {
   console.log('🏗️  Initializing database...');
 
   try {
-    // No 'await' needed anymore
+    // No 'await' needed anymore with better-sqlite3
     const db = openDb();
 
-    // db.exec runs synchronously in better-sqlite3
+    // 1. Users Table
     db.exec(`
       CREATE TABLE IF NOT EXISTS users (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -25,6 +25,7 @@ function initDatabase() {
       );
     `);
 
+    // 2. Transactions Table
     db.exec(`
       CREATE TABLE IF NOT EXISTS transactions (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -36,6 +37,21 @@ function initDatabase() {
         notes TEXT,
         createdAt DATETIME DEFAULT CURRENT_TIMESTAMP,
         FOREIGN KEY(userId) REFERENCES users(id)
+      );
+    `);
+
+    // 3. Budgets Table (NEW)
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS budgets (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        userId INTEGER NOT NULL,
+        category TEXT NOT NULL,
+        amount DECIMAL(10, 2) NOT NULL,
+        month TEXT NOT NULL, 
+        createdAt DATETIME DEFAULT CURRENT_TIMESTAMP,
+        updatedAt DATETIME DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY(userId) REFERENCES users(id),
+        UNIQUE(userId, category, month)
       );
     `);
 

@@ -5,6 +5,7 @@ import session from "express-session"
 
 import { authRouter } from './routes/authRouter.js';
 import { transactionsRouter } from './routes/transactionsRouter.js';
+import { budgetRouter } from './routes/budgetRouter.js';
 
 dotenv.config();
 
@@ -35,6 +36,7 @@ app.use(express.urlencoded({ extended: true }));
 // Routes
 app.use('/auth', authRouter)
 app.use('/transactions', transactionsRouter)
+app.use('/budgets', budgetRouter)
 
 app.use((err, req, res, next) => {
   console.error(err.stack);
