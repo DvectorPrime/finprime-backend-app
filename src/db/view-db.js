@@ -39,7 +39,7 @@ if (!tableName) {
     // Smart Column Selection based on table name
     if (tableName === 'users') {
         // Exclude password for cleaner view
-        query = `SELECT id, email, firstName, googleId, createdAt FROM ${tableName}`;
+        query = `SELECT id, email, firstName, avatar, googleId, createdAt FROM ${tableName}`;
     } else if (tableName === 'transactions') {
         // query = `SELECT id, userId, transactionName, amount, type, category, createdAt FROM ${tableName}`;
         query = `SELECT * FROM ${tableName}`;

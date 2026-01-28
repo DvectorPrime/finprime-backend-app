@@ -181,3 +181,79 @@ export function createTransaction(req, res) {
         return res.status(500).json({ error: "Failed to save transaction." });
     }
 }
+
+export const getMonthlyStats = (req, res) => {
+    const userId = req.session.userId;
+
+    if (!userId) {
+        return res.status(401).json({ error: "Unauthorized" });
+    }
+
+    const db = openDb();
+
+    try {
+        // 1. Calculate the start date (1st day of the month, 5 months ago)
+        // This gives us a 6-month window including the current month
+        const today = new Date();
+        const startMetricsDate = new Date(today.getFullYear(), today.getMonth() - 5, 1);
+        const startDateString = startMetricsDate.toISOString();
+
+        // 2. SQL Query: Group by Month (YYYY-MM) and Type
+        // We use strftime to extract the 'YYYY-MM' part of the date for grouping
+        const query = `
+            SELECT 
+                strftime('%Y-%m', createdAt) as monthKey,
+                type,
+                SUM(amount) as total
+            FROM transactions
+            WHERE userId = ? AND createdAt >= ?
+            GROUP BY monthKey, type
+            ORDER BY monthKey ASC
+        `;
+
+        const rows = db.prepare(query).all(userId, startDateString);
+
+        // 3. Process Data into a Map for easy lookup
+        // Result: { '2025-08': { income: 500, expense: 200 }, '2025-09': ... }
+        const dataMap = {};
+        rows.forEach(row => {
+            if (!dataMap[row.monthKey]) {
+                dataMap[row.monthKey] = { income: 0, expense: 0 };
+            }
+            if (row.type === 'INCOME') {
+                dataMap[row.monthKey].income = row.total;
+            } else {
+                dataMap[row.monthKey].expense = row.total;
+            }
+        });
+
+        // 4. Generate the final array for the last 6 months (filling in gaps)
+        const finalChartData = [];
+        const monthNames = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+
+        for (let i = 5; i >= 0; i--) {
+            // Calculate date for iteration "i" months ago
+            const d = new Date(today.getFullYear(), today.getMonth() - i, 1);
+            
+            // Generate Key: "2025-08"
+            const year = d.getFullYear();
+            const month = String(d.getMonth() + 1).padStart(2, '0');
+            const key = `${year}-${month}`;
+
+            // Get data or default to 0
+            const stats = dataMap[key] || { income: 0, expense: 0 };
+
+            finalChartData.push({
+                month: monthNames[d.getMonth()], // e.g., "Aug"
+                income: stats.income,
+                expense: stats.expense
+            });
+        }
+
+        res.json(finalChartData);
+
+    } catch (error) {
+        console.error("Monthly Stats Error:", error);
+        res.status(500).json({ error: "Failed to fetch chart data" });
+    }
+};

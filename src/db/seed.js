@@ -12,7 +12,6 @@ function getRandomItem(arr) {
   return arr[Math.floor(Math.random() * arr.length)];
 }
 
-// Helper to get "YYYY-MM" for the CURRENT month
 function getCurrentMonthKey() {
   const now = new Date();
   const year = now.getFullYear();
@@ -20,21 +19,18 @@ function getCurrentMonthKey() {
   return `${year}-${month}`;
 }
 
-// NEW: Helper to get "YYYY-MM" for the PREVIOUS month
 function getPreviousMonthKey() {
   const now = new Date();
-  // Subtract 1 month
   const prevDate = new Date(now.getFullYear(), now.getMonth() - 1, 1);
   const year = prevDate.getFullYear();
   const month = String(prevDate.getMonth() + 1).padStart(2, '0');
   return `${year}-${month}`;
 }
 
-// Generates a date specifically in the current or previous month
 function getStrategicDate(type) {
   const now = new Date();
   const year = now.getFullYear();
-  const month = now.getMonth(); // 0-11
+  const month = now.getMonth();
 
   if (type === 'CURRENT_MONTH') {
     const day = Math.floor(Math.random() * now.getDate()) + 1;
@@ -61,23 +57,25 @@ async function seedDatabase() {
       email: 'admin@example.com',
       password: await bcrypt.hash('password123', 10),
       firstName: 'Admin',
-      lastName: 'User'
+      lastName: 'User',
+      avatar: '' // Empty string as requested
     },
     {
       email: 'user@example.com',
       password: await bcrypt.hash('password123', 10),
       firstName: 'Test',
-      lastName: 'User'
+      lastName: 'User',
+      avatar: ''
     }
   ];
 
   const insertUserStmt = db.prepare(`
-    INSERT OR IGNORE INTO users (email, password, firstName, lastName) 
-    VALUES (?, ?, ?, ?)
+    INSERT OR IGNORE INTO users (email, password, firstName, lastName, avatar) 
+    VALUES (?, ?, ?, ?, ?)
   `);
 
   for (const user of users) {
-    const info = insertUserStmt.run(user.email, user.password, user.firstName, user.lastName);
+    const info = insertUserStmt.run(user.email, user.password, user.firstName, user.lastName, user.avatar);
     if (info.changes > 0) {
       console.log(`👤 Added user: ${user.email}`);
     } else {
@@ -87,7 +85,7 @@ async function seedDatabase() {
 
   const allUsers = db.prepare('SELECT id, email FROM users').all();
 
-  // --- PART 2: SEED BUDGETS (UPDATED) ---
+  // --- PART 2: SEED BUDGETS ---
   console.log('📉 Seeding budgets...');
   
   const insertBudgetStmt = db.prepare(`
@@ -95,18 +93,14 @@ async function seedDatabase() {
     VALUES (?, ?, ?, ?)
   `);
 
-  const currentMonth = getCurrentMonthKey();   // e.g., "2026-01"
-  const previousMonth = getPreviousMonthKey(); // e.g., "2025-12" or "2026-00" handled correctly by Date
-
+  const currentMonth = getCurrentMonthKey();
+  const previousMonth = getPreviousMonthKey();
   const monthsToSeed = [currentMonth, previousMonth];
 
   for (const user of allUsers) {
     for (const monthKey of monthsToSeed) {
-        // Create a budget for EVERY expense category for this month
         for (const category of expenseCategories) {
-            // Set a budget between 50k and 150k
             const amount = getRandomAmount(50000, 150000); 
-            
             insertBudgetStmt.run(user.id, category, amount, monthKey);
         }
     }
@@ -123,17 +117,27 @@ async function seedDatabase() {
 
   for (const user of allUsers) {
     console.log(`   -> Generating data for ${user.email}...`);
-    
-    // 1. Generate 40 Transactions for THIS Month
     for (let i = 0; i < 40; i++) {
       createRandomTransaction(user.id, 'CURRENT_MONTH');
     }
-
-    // 2. Generate 40 Transactions for LAST Month
     for (let i = 0; i < 40; i++) {
       createRandomTransaction(user.id, 'PREVIOUS_MONTH');
     }
   }
+
+  // --- PART 4: SEED SETTINGS (NEW) ---
+  console.log('⚙️  Seeding user settings...');
+  
+  // We use INSERT OR IGNORE so we don't overwrite if settings already exist
+  const insertSettingsStmt = db.prepare(`
+    INSERT OR IGNORE INTO settings (userId, themePreference, currency, aiInsights, budgetAlerts)
+    VALUES (?, 'System', 'NGN', 1, 0)
+  `);
+
+  for (const user of allUsers) {
+    insertSettingsStmt.run(user.id);
+  }
+  console.log('✅ Default settings applied to all users!');
 
   function createRandomTransaction(userId, period) {
     const isIncome = Math.random() > 0.5;

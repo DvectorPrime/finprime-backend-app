@@ -6,6 +6,7 @@ import session from "express-session"
 import { authRouter } from './routes/authRouter.js';
 import { transactionsRouter } from './routes/transactionsRouter.js';
 import { budgetRouter } from './routes/budgetRouter.js';
+import { settingsRouter } from './routes/settingsRouter.js';
 
 dotenv.config();
 
@@ -15,7 +16,7 @@ const PORT = process.env.PORT || 8000;
 // Middleware
 app.use(cors({
   origin: 'http://localhost:3000', // Allow only this origin
-  methods: ['GET', 'POST', 'PUT', 'DELETE'], // Allowed HTTP methods
+  methods: ['GET', 'POST', 'PUT'], // Allowed HTTP methods
   credentials: true // Allow cookies/headers if needed
 }))
 
@@ -37,6 +38,7 @@ app.use(express.urlencoded({ extended: true }));
 app.use('/auth', authRouter)
 app.use('/transactions', transactionsRouter)
 app.use('/budgets', budgetRouter)
+app.use('/settings', settingsRouter)
 
 app.use((err, req, res, next) => {
   console.error(err.stack);

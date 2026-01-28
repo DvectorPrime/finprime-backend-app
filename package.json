@@ -11,7 +11,7 @@
     "db:seed": "node src/db/seed.js",
     "db:drop": "node src/db/dropTable.js",
     "db:log": "node src/db/view-db.js",
-    "db:reset": "node src/db/dropTable.js transactions && node src/db/dropTable.js budgets && node src/db/dropTable.js users && node src/db/init.js && node src/db/seed.js"
+    "db:reset": "node src/db/dropTable.js transactions && node src/db/dropTable.js budgets && node src/db/dropTable.js settings && node src/db/dropTable.js users && node src/db/init.js && node src/db/seed.js"
   },
   "keywords": [],
   "author": "",
