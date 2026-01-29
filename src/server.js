@@ -7,6 +7,7 @@ import { authRouter } from './routes/authRouter.js';
 import { transactionsRouter } from './routes/transactionsRouter.js';
 import { budgetRouter } from './routes/budgetRouter.js';
 import { settingsRouter } from './routes/settingsRouter.js';
+import { uploadRouter } from './routes/uploadRouter.js';
 
 dotenv.config();
 
@@ -39,6 +40,7 @@ app.use('/auth', authRouter)
 app.use('/transactions', transactionsRouter)
 app.use('/budgets', budgetRouter)
 app.use('/settings', settingsRouter)
+app.use('/upload', uploadRouter)
 
 app.use((err, req, res, next) => {
   console.error(err.stack);
