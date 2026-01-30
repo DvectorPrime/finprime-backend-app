@@ -2,26 +2,17 @@ import bcrypt from "bcryptjs"
 import { openDb } from "../db/database.js"
 
 export async function meController(req, res) {
-
     const db = openDb()
-
     const id = req.session.userId
 
     if (!id){
         return res.json({ isAuthenticated : false, user: null})
     }
 
-    // UPDATED: Left Join to get User details + Settings
     const stmt = db.prepare(`
         SELECT 
-            u.firstName, 
-            u.lastName, 
-            u.email, 
-            u.avatar,
-            s.themePreference, 
-            s.currency, 
-            s.aiInsights, 
-            s.budgetAlerts
+            u.firstName, u.lastName, u.email, u.avatar, u.googleId, u.password, -- Get password field
+            s.themePreference, s.currency, s.aiInsights, s.budgetAlerts
         FROM users u
         LEFT JOIN settings s ON u.id = s.userId
         WHERE u.id = ?
@@ -30,12 +21,13 @@ export async function meController(req, res) {
     const data = stmt.get(id) || null
 
     if (!data){
-        // If session exists but user is deleted from DB
         return res.status(401).json({ isAuthenticated: false, error : "User Not Found."})
     }
 
-    // Map database columns to the frontend structure you requested
-    // SQLite stores booleans as 1/0, so we convert them here
+    if (!data){
+        return res.status(401).json({ isAuthenticated: false, error : "User Not Found."})
+    }
+
     return res.json({ 
         isAuthenticated : true, 
         user: {
@@ -45,8 +37,11 @@ export async function meController(req, res) {
             avatarUrl: data.avatar || "", 
             themePreference: data.themePreference || "System",
             currencyPreference: data.currency || "NGN",
-            aiInsights: data.aiInsights === 1, // Convert 1 -> true
-            budgetAlerts: data.budgetAlerts === 1
+            aiInsights: data.aiInsights === 1,
+            budgetAlerts: data.budgetAlerts === 1,
+            // NEW FLAG: Frontend uses this to decide whether to show Password input
+            isGoogleAccount: !!data.googleId, 
+            hasPassword: !!data.password && data.password.length > 0
         }
     })
 }
@@ -227,3 +222,110 @@ export async function logOutUser(req, res) {
         res.json({message: 'Logged out'})
     })
 }
+
+export const changePassword = async (req, res) => {
+    const { currentPassword, newPassword } = req.body;
+    const userId = req.session.userId;
+
+    if (!userId) return res.status(401).json({ error: "Unauthorized." });
+
+    if (!newPassword || newPassword.length < 6) {
+        return res.status(400).json({ error: "New password must be at least 6 characters." });
+    }
+
+    const db = openDb();
+
+    try {
+        const user = db.prepare('SELECT password FROM users WHERE id = ?').get(userId);
+        if (!user) return res.status(404).json({ error: "User not found." });
+
+        const userHasPassword = !!user.password && user.password.length > 0;
+
+        // === LOGIC BRANCH ===
+        // If user HAS a password, they MUST provide the correct current one.
+        if (userHasPassword) {
+            if (!currentPassword) {
+                return res.status(400).json({ error: "Current password is required." });
+            }
+            const isMatch = await bcrypt.compare(currentPassword, user.password);
+            if (!isMatch) {
+                return res.status(401).json({ error: "Incorrect current password." });
+            }
+        } 
+        // If user has NO password (Google only), we SKIP the check and let them set one.
+
+        // Hash new password
+        const hashedPassword = await bcrypt.hash(newPassword, 10);
+
+        // Update DB
+        db.prepare('UPDATE users SET password = ? WHERE id = ?').run(hashedPassword, userId);
+
+        return res.json({ success: true, message: "Password updated successfully." });
+
+    } catch (error) {
+        console.error("Change Password Error:", error);
+        return res.status(500).json({ error: "Internal server error." });
+    }
+};
+
+export const deleteAccount = async (req, res) => {
+    const { password } = req.body;
+    const userId = req.session.userId;
+
+    if (!userId) {
+        return res.status(401).json({ error: "Unauthorized." });
+    }
+
+    const db = openDb();
+
+    try {
+        // Fetch user including googleId
+        const user = db.prepare('SELECT email, password, createdAt, googleId FROM users WHERE id = ?').get(userId);
+
+        if (!user) {
+            return res.status(404).json({ error: "User not found." });
+        }
+
+        // === LOGIC BRANCH ===
+        // Case A: Google User (Has googleId) -> Skip password check
+        // Case B: Regular User -> Require password check
+        
+        if (user.googleId) {
+            // It's a Google user, allow deletion without password
+            // (The session cookie proves their identity)
+        } else {
+            // It's a standard user, enforce password check
+            if (!password) {
+                return res.status(400).json({ error: "Password is required." });
+            }
+            const isMatch = await bcrypt.compare(password, user.password);
+            if (!isMatch) {
+                return res.status(401).json({ error: "Incorrect password." });
+            }
+        }
+
+        // ... Rest of the archive and delete logic remains the same ...
+        
+        // 1. Archive
+        const archiveStmt = db.prepare(`
+            INSERT INTO deleted_users (email, originalUserId, userCreatedAt) 
+            VALUES (?, ?, ?)
+        `);
+        archiveStmt.run(user.email, userId, user.createdAt);
+
+        // 2. Delete
+        const deleteStmt = db.prepare('DELETE FROM users WHERE id = ?');
+        deleteStmt.run(userId);
+
+        // 3. Logout
+        req.session.destroy((err) => {
+            if (err) return res.status(500).json({ error: "Failed to log out." });
+            res.clearCookie('connect.sid');
+            return res.json({ success: true, message: "Account deleted." });
+        });
+
+    } catch (error) {
+        console.error("Delete Error:", error);
+        return res.status(500).json({ error: "Internal server error." });
+    }
+};

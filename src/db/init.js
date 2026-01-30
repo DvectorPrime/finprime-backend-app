@@ -9,7 +9,7 @@ function initDatabase() {
   try {
     const db = openDb();
 
-    // 1. Users Table (Ensuring avatar column is included)
+    // 1. Users Table
     db.exec(`
       CREATE TABLE IF NOT EXISTS users (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -35,7 +35,7 @@ function initDatabase() {
         category TEXT NOT NULL,
         notes TEXT,
         createdAt DATETIME DEFAULT CURRENT_TIMESTAMP,
-        FOREIGN KEY(userId) REFERENCES users(id)
+        FOREIGN KEY(userId) REFERENCES users(id) ON DELETE CASCADE
       );
     `);
 
@@ -49,13 +49,12 @@ function initDatabase() {
         month TEXT NOT NULL, 
         createdAt DATETIME DEFAULT CURRENT_TIMESTAMP,
         updatedAt DATETIME DEFAULT CURRENT_TIMESTAMP,
-        FOREIGN KEY(userId) REFERENCES users(id),
+        FOREIGN KEY(userId) REFERENCES users(id) ON DELETE CASCADE,
         UNIQUE(userId, category, month)
       );
     `);
 
-    // 4. Settings Table (NEW)
-    // aiInsights: 1 = true, 0 = false (SQLite uses integers for booleans)
+    // 4. Settings Table
     db.exec(`
       CREATE TABLE IF NOT EXISTS settings (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -66,7 +65,19 @@ function initDatabase() {
         budgetAlerts INTEGER DEFAULT 0,
         createdAt DATETIME DEFAULT CURRENT_TIMESTAMP,
         updatedAt DATETIME DEFAULT CURRENT_TIMESTAMP,
-        FOREIGN KEY(userId) REFERENCES users(id)
+        FOREIGN KEY(userId) REFERENCES users(id) ON DELETE CASCADE
+      );
+    `);
+
+    // 5. Deleted Accounts Table (NEW)
+    // Stores specific info about deleted users for audit/recovery purposes
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS deleted_users (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        email TEXT,
+        originalUserId INTEGER,
+        userCreatedAt DATETIME,
+        deletedAt DATETIME DEFAULT CURRENT_TIMESTAMP
       );
     `);
 
