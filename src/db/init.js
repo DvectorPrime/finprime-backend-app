@@ -81,6 +81,17 @@ function initDatabase() {
       );
     `);
 
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS verification_codes (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        email TEXT NOT NULL,
+        code TEXT NOT NULL,
+        type TEXT CHECK(type IN ('REGISTRATION', 'PASSWORD_RESET')) NOT NULL,
+        expiresAt DATETIME NOT NULL,
+        createdAt DATETIME DEFAULT CURRENT_TIMESTAMP
+      );
+    `);
+
     console.log('✅ Database initialized successfully!');
   } catch (err) {
     console.error('❌ Error initializing database:', err);

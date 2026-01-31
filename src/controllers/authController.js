@@ -1,5 +1,6 @@
 import bcrypt from "bcryptjs"
 import { openDb } from "../db/database.js"
+import { sendEmail } from "../utils/emailService.js"
 
 export async function meController(req, res) {
     const db = openDb()
@@ -85,47 +86,89 @@ export async function login(req, res) {
 }
 
 export async function register(req, res){
-    const db = openDb()
+    const db = openDb();
 
-    let { firstName, email, password } = req.body
+    // Now accepting 'code' from frontend
+    let { firstName, lastName, email, password, code } = req.body;
 
-    // Basic validation
-    if (!firstName || !email || !password) {
-        return res.status(400).json({error: "All fields are required"})
+    if (!firstName ||!lastName || !email || !password || !code) {
+        return res.status(400).json({error: "All fields including verification code are required"});
     }
 
-    firstName = firstName.split(" ")[0] 
-    
-    const emailRegex = /^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$/
-    
-    if (!emailRegex.test(email)){
-        return res.status(400).json({error : "Invalid Email Address"})
-    }
-    
-    const passwordHash = await bcrypt.hash(password, 10)
-    
-    const emailStmt = db.prepare('SELECT email FROM users WHERE email = ?')
-    const emailExists = emailStmt.get(email)
+    // --- VERIFICATION STEP ---
+    const validCode = db.prepare(`
+        SELECT id FROM verification_codes 
+        WHERE email = ? AND code = ? AND type = 'REGISTRATION' 
+        AND expiresAt > datetime('now')
+        ORDER BY createdAt DESC LIMIT 1
+    `).get(email, code);
 
+    if (!validCode) {
+        return res.status(400).json({ error: "Invalid or expired verification code" });
+    }
+    // -------------------------
+
+    firstName = firstName.split(" ")[0]; 
+    const passwordHash = await bcrypt.hash(password, 10);
+
+    // Double check user doesn't exist (race condition safety)
+    const emailExists = db.prepare('SELECT email FROM users WHERE email = ?').get(email);
     if (emailExists){
-        return res.status(400).json({error : "User already exists"})
+        return res.status(400).json({error : "User already exists"});
     }
 
-    // 1. Create User
-    const createUserStatement = db.prepare('INSERT INTO users (email, firstName, password, avatar) VALUES (?, ?, ?, ?)')
-    // Added empty string for avatar default
-    const results = createUserStatement.run(email, firstName, passwordHash, "")
+    try {
+        // Create User
+        const createUserStatement = db.prepare('INSERT INTO users (email, firstName, lastName, password, avatar) VALUES (?, ?, ?, ?, ?)');
+        const results = createUserStatement.run(email, firstName, lastName, passwordHash, "");
+        const userId = results.lastInsertRowid;
 
-    const userId = results.lastInsertRowid
+        // Create Default Settings
+        db.prepare('INSERT INTO settings (userId) VALUES (?)').run(userId);
 
-    // 2. UPDATED: Create Default Settings for this new user
-    // The database defaults (System, NGN, 1, 0) will handle the values
-    const createSettingsStmt = db.prepare('INSERT INTO settings (userId) VALUES (?)')
-    createSettingsStmt.run(userId)
+        // Cleanup: Delete used verification code
+        db.prepare('DELETE FROM verification_codes WHERE id = ?').run(validCode.id);
 
-    req.session.userId = userId
+        req.session.userId = userId;
+        return res.json({success : "Account Verified & Created Successfully", firstName : firstName});
+        
+    } catch (err) {
+        console.error("Registration Error", err);
+        return res.status(500).json({ error: "Database error during registration" });
+    }
+}
 
-    return res.json({success : "Account Created Successfully", firstName : firstName})
+export async function sendRegistrationCode(req, res) {
+    const { email, firstName } = req.body;
+    const db = openDb();
+
+    // Check if user already exists
+    const user = db.prepare('SELECT id FROM users WHERE email = ?').get(email);
+    if (user) {
+        return res.status(400).json({ error: "User already exists. Please login." });
+    }
+
+    // Generate 6-digit Code
+    const code = Math.floor(100000 + Math.random() * 900000).toString();
+    const expiresAt = new Date(Date.now() + 15 * 60000).toISOString(); // 15 mins
+
+    try {
+        // Save code to DB
+        db.prepare(`
+            INSERT INTO verification_codes (email, code, type, expiresAt) 
+            VALUES (?, ?, 'REGISTRATION', ?)
+        `).run(email, code, expiresAt);
+
+        // Send Email
+        const emailSent = await sendEmail(email, firstName, code, 'REGISTRATION');
+        
+        if (!emailSent) throw new Error("Failed to send email via Brevo");
+
+        res.json({ success: true, message: "Verification code sent!" });
+    } catch (error) {
+        console.error(error);
+        res.status(500).json({ error: "Failed to send verification code" });
+    }
 }
 
 export async function googleAuth(req, res){
@@ -267,6 +310,98 @@ export const changePassword = async (req, res) => {
         return res.status(500).json({ error: "Internal server error." });
     }
 };
+
+// 1. REQUEST PASSWORD RESET (Sends PIN)
+export const forgotPassword = async (req, res) => {
+    const { email } = req.body;
+    
+    if (!email) return res.status(400).json({ error: "Email is required." });
+
+    const db = openDb();
+
+    try {
+        // Check if user exists 
+        const user = db.prepare('SELECT firstName, googleId FROM users WHERE email = ?').get(email);
+
+        if (!user) {
+            // Security best practice: Don't explicitly say "User not found" to prevent email scraping.
+            // But for your UX, we will return success even if user isn't found (or you can show an error if you prefer).
+            // Let's return success to pretend we sent it.
+            return res.json({ success: true, message: "If an account exists, a code has been sent." });
+        }
+
+        if (user.googleId) {
+            return res.status(400).json({ error: "This account uses Google Sign-In. Please sign in with Google." });
+        }
+
+        // Generate 6-digit PIN
+        const pin = Math.floor(100000 + Math.random() * 900000).toString();
+        
+        // Set Expiry (15 minutes from now)
+        const expiresAt = new Date(Date.now() + 15 * 60 * 1000).toISOString();
+
+        // Save PIN to DB
+        const stmt = db.prepare('INSERT INTO verification_codes (email, code, type, expiresAt) VALUES (?, ?, ?, ?)');
+        stmt.run(email, pin, 'PASSWORD_RESET', expiresAt);
+
+        // Send Email via Brevo
+        const sent = await sendEmail(email, user.firstName, pin, 'PASSWORD_RESET');
+
+        if (!sent) throw new Error("Failed to send email via service");
+
+        res.json({ success: true, message: "Verification code sent to your email." });
+
+    } catch (error) {
+        console.error("Forgot Password Error:", error);
+        res.status(500).json({ error: "Failed to send verification code." });
+    }
+};
+
+// 2. VERIFY PIN & RESET PASSWORD
+export const resetPasswordWithPin = async (req, res) => {
+    const { email, code, newPassword } = req.body;
+
+    if (!email || !code || !newPassword) {
+        return res.status(400).json({ error: "All fields are required." });
+    }
+
+    if (newPassword.length < 6) {
+        return res.status(400).json({ error: "Password must be at least 6 characters." });
+    }
+
+    const db = openDb();
+
+    try {
+        // 1. Verify Code
+        const validCode = db.prepare(`
+            SELECT id FROM verification_codes 
+            WHERE email = ? AND code = ? AND type = 'PASSWORD_RESET' 
+            AND expiresAt > datetime('now')
+            ORDER BY createdAt DESC LIMIT 1
+        `).get(email, code);
+
+        if (!validCode) {
+            return res.status(400).json({ error: "Invalid or expired verification code." });
+        }
+
+        // 2. Hash New Password
+        const hashedPassword = await bcrypt.hash(newPassword, 10);
+
+        // 3. Update User Password
+        const updateStmt = db.prepare('UPDATE users SET password = ? WHERE email = ?');
+        updateStmt.run(hashedPassword, email);
+
+        // 4. Cleanup: Delete used code
+        db.prepare('DELETE FROM verification_codes WHERE id = ?').run(validCode.id);
+
+        res.json({ success: true, message: "Password reset successfully. You can now login." });
+
+    } catch (error) {
+        console.error("Reset Password Error:", error);
+        res.status(500).json({ error: "Internal server error." });
+    }
+};
+
 
 export const deleteAccount = async (req, res) => {
     const { password } = req.body;
