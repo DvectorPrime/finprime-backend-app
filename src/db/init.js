@@ -69,8 +69,7 @@ function initDatabase() {
       );
     `);
 
-    // 5. Deleted Accounts Table (NEW)
-    // Stores specific info about deleted users for audit/recovery purposes
+    // 5. Deleted Accounts Table
     db.exec(`
       CREATE TABLE IF NOT EXISTS deleted_users (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -81,6 +80,7 @@ function initDatabase() {
       );
     `);
 
+    // 6. Verification Codes Table
     db.exec(`
       CREATE TABLE IF NOT EXISTS verification_codes (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -89,6 +89,22 @@ function initDatabase() {
         type TEXT CHECK(type IN ('REGISTRATION', 'PASSWORD_RESET')) NOT NULL,
         expiresAt DATETIME NOT NULL,
         createdAt DATETIME DEFAULT CURRENT_TIMESTAMP
+      );
+    `);
+
+    // 7. AI Insights Table (NEW)
+    // - type: Distinguishes between Dashboard tips and Budget analysis
+    // - content: The actual text response from Gemini
+    // - expiresAt: Calculated when we insert the row (Now + 2 days or Now + 3 days)
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS ai_insights (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        userId INTEGER NOT NULL,
+        type TEXT CHECK(type IN ('DASHBOARD', 'BUDGET')) NOT NULL,
+        content TEXT NOT NULL,
+        expiresAt DATETIME NOT NULL,
+        createdAt DATETIME DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY(userId) REFERENCES users(id) ON DELETE CASCADE
       );
     `);
 

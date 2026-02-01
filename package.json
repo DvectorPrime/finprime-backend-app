@@ -11,13 +11,14 @@
     "db:seed": "node src/db/seed.js",
     "db:drop": "node src/db/dropTable.js",
     "db:log": "node src/db/view-db.js",
-    "db:reset": "node src/db/dropTable.js transactions && node src/db/dropTable.js budgets && node src/db/dropTable.js settings && node src/db/dropTable.js users && node src/db/dropTable.js deleted_users && node src/db/dropTable.js verification_codes && node src/db/init.js && node src/db/seed.js"
+    "db:reset": "node src/db/dropTable.js transactions && node src/db/dropTable.js budgets && node src/db/dropTable.js settings && node src/db/dropTable.js ai_insights && node src/db/dropTable.js users && node src/db/dropTable.js deleted_users && node src/db/dropTable.js verification_codes && node src/db/init.js && node src/db/seed.js"
   },
   "keywords": [],
   "author": "",
   "license": "ISC",
   "dependencies": {
     "@getbrevo/brevo": "^3.0.1",
+    "@google/genai": "^1.39.0",
     "bcryptjs": "^2.4.3",
     "better-sqlite3": "^12.6.2",
     "cloudinary": "^2.9.0",

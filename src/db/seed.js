@@ -117,10 +117,10 @@ async function seedDatabase() {
 
   for (const user of allUsers) {
     console.log(`   -> Generating data for ${user.email}...`);
-    for (let i = 0; i < 40; i++) {
+    for (let i = 0; i < 30; i++) {
       createRandomTransaction(user.id, 'CURRENT_MONTH');
     }
-    for (let i = 0; i < 40; i++) {
+    for (let i = 0; i < 30; i++) {
       createRandomTransaction(user.id, 'PREVIOUS_MONTH');
     }
   }
@@ -140,7 +140,7 @@ async function seedDatabase() {
   console.log('✅ Default settings applied to all users!');
 
   function createRandomTransaction(userId, period) {
-    const isIncome = Math.random() > 0.5;
+    const isIncome = Math.random() > 0.7;
     const type = isIncome ? 'INCOME' : 'EXPENSE';
     const category = isIncome ? getRandomItem(incomeCategories) : getRandomItem(expenseCategories);
     
