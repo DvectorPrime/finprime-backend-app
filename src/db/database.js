@@ -12,7 +12,7 @@ export function openDb() {
 
   // Open the database
   db = new Database(dbPath, { 
-    // verbose: console.log // Uncomment this line to see every query printed to the console
+    // verbose: console.log
   });
 
   // Enable foreign keys

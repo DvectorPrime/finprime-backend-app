@@ -1,6 +1,5 @@
 import { v2 as cloudinary } from "cloudinary";
-import { openDb } from "../db/database.js"; // Adjust path to your DB file
-// import streamifier from 'streamifier'; // Optional: helps turn buffer to stream, or use built-in logic below
+import { openDb } from "../db/database.js";
 
 export const uploadAvatar = async (req, res) => {
   // 1. Configure Cloudinary

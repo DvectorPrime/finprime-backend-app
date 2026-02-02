@@ -1,5 +1,6 @@
 import { openDb } from "../db/database.js";
 import { generateFinancialInsight } from "../utils/aiService.js";
+import { getMonthDateRange } from "../utils/getMonthRange.js";
 
 export const getInsight = async (req, res) => {
     const userId = req.session.userId;
@@ -13,8 +14,6 @@ export const getInsight = async (req, res) => {
     const db = openDb();
 
     try {
-        // 1. CHECK CACHE
-        // We check if a valid insight already exists to save API costs
         const cachedInsight = db.prepare(`
             SELECT content FROM ai_insights 
             WHERE userId = ? AND type = ? AND expiresAt > datetime('now')
@@ -26,24 +25,29 @@ export const getInsight = async (req, res) => {
             return res.json({ insight: cachedInsight.content, source: 'cache' });
         }
 
-        // 2. CHECK GLOBAL DATA SUFFICIENCY (New User Check)
         const txCount = db.prepare('SELECT COUNT(*) as count FROM transactions WHERE userId = ?').get(userId);
 
         if (txCount.count === 0) {
-            console.log("⚠️ New user detected. Skipping AI generation.");
             return res.json({ 
-                insight: "Welcome to FinPrime! Start adding your income and expenses to unlock personalized AI insights about your spending habits.", 
+                insight: "Welcome to FinPrime! Start adding your income and expenses to unlock personalized AI insights.", 
                 source: 'default' 
             });
         }
 
-        // 3. CACHE MISS: PREPARE DATA FOR AI
         console.log(`🤖 Generating new ${type} insight...`);
         
         let contextData = {};
+        const current = getMonthDateRange(0)
+        const last = getMonthDateRange(1)
 
         if (type === 'DASHBOARD') {
-            // Get last 30 days of activity
+            // const rawTxs = db.prepare(`
+            //     SELECT transactionName, amount, type, category, createdAt 
+            //     FROM transactions 
+            //     WHERE userId = ? AND createdAt >= ? AND createdAt <= ?
+            //     ORDER BY createdAt DESC
+            // `).all(userId,last.start, current.end);
+
             const rawTxs = db.prepare(`
                 SELECT transactionName, amount, type, category, createdAt 
                 FROM transactions 
@@ -57,8 +61,7 @@ export const getInsight = async (req, res) => {
                 return acc;
             }, { totalIncome: 0, totalExpense: 0 });
 
-            // Send top 50 recent transactions for pattern recognition
-            const recentTransactions = rawTxs.slice(0, 50).map(t => ({
+            const recentTransactions = rawTxs.map(t => ({
                 date: t.createdAt.split('T')[0], 
                 name: t.transactionName,
                 amt: t.amount,
@@ -74,52 +77,43 @@ export const getInsight = async (req, res) => {
         } else if (type === 'BUDGET') {
             const currentMonth = new Date().toISOString().slice(0, 7); // e.g., "2026-02"
             
-            console.log(`🔎 Budget Insight: Looking for expenses in ${currentMonth}`);
-
-            // A. Get the Goals (Budgets)
             const budgetTargets = db.prepare('SELECT category, amount FROM budgets WHERE userId = ? AND month = ?').all(userId, currentMonth);
             
-            // B. Get Actual Expenses (Using LIKE for safe string matching)
+            // let rawTxs = db.prepare(`
+            //     SELECT transactionName, amount, category, createdAt 
+            //     FROM transactions 
+            //     WHERE userId = ? 
+            //     AND type = 'EXPENSE' 
+            //     AND createdAt LIKE ? 
+            //     ORDER BY amount DESC
+            // `).all(userId, `${currentMonth}%`);
+
             let rawTxs = db.prepare(`
                 SELECT transactionName, amount, category, createdAt 
                 FROM transactions 
                 WHERE userId = ? 
                 AND type = 'EXPENSE' 
-                AND createdAt LIKE ? 
-                ORDER BY amount DESC
-            `).all(userId, `${currentMonth}%`);
+                AND createdAt >= ? 
+                AND createdAt <= ?
+                ORDER BY createdAt DESC
+            `).all(userId, last.start, current.end);
 
-            let analysisType = "CURRENT_MONTH";
+            let rawTxs2 = db.prepare(`
+                SELECT transactionName, amount, category, createdAt 
+                FROM transactions 
+                WHERE userId = ? 
+                AND type = 'EXPENSE' 
+                AND createdAt >= ? 
+                AND createdAt <= ?
+                ORDER BY createdAt DESC
+            `).all(userId, current.start, current.end);
 
-            // --- ⚠️ FALLBACK: If this month is empty (e.g., 1st of the month) ---
-            // We fetch the PREVIOUS month so the AI isn't silent
-            if (rawTxs.length === 0) {
-                console.log("⚠️ No data for this month. Fetching LAST month for context.");
-                
-                const d = new Date();
-                d.setMonth(d.getMonth() - 1);
-                const lastMonth = d.toISOString().slice(0, 7); // e.g., "2026-01"
-
-                rawTxs = db.prepare(`
-                    SELECT transactionName, amount, category, createdAt 
-                    FROM transactions 
-                    WHERE userId = ? 
-                    AND type = 'EXPENSE' 
-                    AND createdAt LIKE ? 
-                    ORDER BY amount DESC
-                `).all(userId, `${lastMonth}%`);
-
-                analysisType = "LAST_MONTH_REVIEW";
-            }
-
-            // C. Calculate Totals (Help the AI with math)
-            const categoryActuals = rawTxs.reduce((acc, curr) => {
+            const categoryActuals = rawTxs2.reduce((acc, curr) => {
                 acc[curr.category] = (acc[curr.category] || 0) + curr.amount;
                 return acc;
             }, {});
 
-            // D. Format List for AI (Limit to 60 items)
-            const txHistory = rawTxs.slice(0, 60).map(t => ({
+            const txHistory = rawTxs.map(t => ({
                 item: t.transactionName,
                 amt: t.amount,
                 cat: t.category,
@@ -127,22 +121,18 @@ export const getInsight = async (req, res) => {
             }));
 
             contextData = {
-                periodAnalyzed: analysisType === "CURRENT_MONTH" ? currentMonth : "Last Month (Context)",
                 monthlyBudgetPlan: budgetTargets,     
-                spendingSummary: categoryActuals, 
-                actualSpendingDetails: txHistory      
+                spendingSummaryForThisMonth: categoryActuals, 
+                actualSpendingDetailsForPastTwoMonths: txHistory      
             };
         }
 
-        // 4. ASK GEMINI
         const newInsightText = await generateFinancialInsight(contextData, type);
 
         if (!newInsightText) {
             return res.status(500).json({ error: "Failed to generate insight" });
         }
 
-        // 5. SAVE TO DB
-        // Dashboard insights last 2 days, Budget insights last 3 days
         const daysToAdd = type === 'DASHBOARD' ? 2 : 4;
         const expiresAt = new Date(Date.now() + daysToAdd * 24 * 60 * 60 * 1000).toISOString();
 

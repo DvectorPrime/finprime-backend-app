@@ -5,7 +5,6 @@ export function getTransactions(userId, filters) {
     const PAGE_SIZE = 15;
     const safePage = Math.max(1, parseInt(filters.page) || 1);
 
-    // --- CASE 1: Dashboard "Recent Only" Mode (Fast Path) ---
     if (filters.recentOnly) {
         const stmt = db.prepare(`
             SELECT id, transactionName, amount, type, category, notes, createdAt, notes 
@@ -20,12 +19,6 @@ export function getTransactions(userId, filters) {
         };
     }
 
-    // --- CASE 2: Full Transactions Page ---
-    
-    // 1. Build the Dynamic Query
-    // We will use the same 'whereClause' for 3 things: 
-    // (a) Getting the data, (b) Counting pages, (c) Summing totals
-    
     const conditions = ["userId = ?"];
     const params = [userId];
 
@@ -63,18 +56,11 @@ export function getTransactions(userId, filters) {
     // Combine conditions
     const whereClause = " WHERE " + conditions.join(" AND ");
 
-
-    // --- 2. EXECUTE QUERIES ---
-
-    // Query A: Get Pagination Count
     const countStmt = db.prepare(`SELECT COUNT(*) as total FROM transactions ${whereClause}`);
     const totalResult = countStmt.get(...params);
     const totalTransactions = totalResult.total;
     const totalPages = Math.ceil(totalTransactions / PAGE_SIZE);
 
-    // Query B: Get Financial Totals (The new part!)
-    // We sum up the results based on the EXACT same filters. 
-    // If you filtered for "Food", Income will be 0 and Expense will be the sum of Food.
     const summaryStmt = db.prepare(`
         SELECT 
             SUM(CASE WHEN type = 'INCOME' THEN amount ELSE 0 END) as totalIncome,
@@ -86,7 +72,7 @@ export function getTransactions(userId, filters) {
     const summaryResult = summaryStmt.get(...params);
 
     const offset = (safePage - 1) * PAGE_SIZE;
-    const finalParams = [...params, PAGE_SIZE, offset]; // Add Limit/Offset to end of params
+    const finalParams = [...params, PAGE_SIZE, offset]; 
 
     const dataStmt = db.prepare(`
         SELECT id, transactionName, amount, type, category, createdAt, notes 

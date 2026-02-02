@@ -10,6 +10,6 @@ authRouter.get("/me", meController)
 authRouter.post("/google", googleAuth)
 authRouter.get("/logout", logOutUser)
 authRouter.put("/change-password", changePassword)
-authRouter.post('/forgot-password', forgotPassword);      // <--- Add this
-authRouter.post('/reset-password', resetPasswordWithPin); // <--- Add this
+authRouter.post('/forgot-password', forgotPassword);
+authRouter.post('/reset-password', resetPasswordWithPin);
 authRouter.delete("/delete-account", deleteAccount)

@@ -10,8 +10,6 @@ export const getSettings = (req, res) => {
     const db = openDb();
 
     try {
-        // Fetch User details AND Settings in one go
-        // We use LEFT JOIN so if settings are missing (rare), we still get the user info
         const data = db.prepare(`
             SELECT 
                 u.firstName, 
@@ -37,7 +35,6 @@ export const getSettings = (req, res) => {
             ...data,
             aiInsights: Boolean(data.aiInsights),   // 1 -> true, 0 -> false
             budgetAlerts: Boolean(data.budgetAlerts),
-            // Default fallbacks in case of NULL (e.g. if seed didn't run perfect)
             themePreference: data.themePreference || 'System',
             currency: data.currency || 'NGN'
         };
@@ -51,7 +48,6 @@ export const getSettings = (req, res) => {
 };
 
 export const updateSettings = (req, res) => {
-    // 1. Auth Check
     const userId = req.session.userId;
     if (!userId) {
         return res.status(401).json({ error: "Unauthorized" });
@@ -64,15 +60,12 @@ export const updateSettings = (req, res) => {
 
     const db = openDb();
 
-    // Define which fields belong to which table
     const userFields = ['firstName', 'lastName', 'avatar'];
     const settingFields = ['themePreference', 'currency', 'aiInsights', 'budgetAlerts'];
 
     try {
-        // We use a transaction to ensure User and Settings tables stay in sync
         const updateTransaction = db.transaction((data) => {
             
-            // --- PART A: Update 'users' table ---
             const userUpdates = [];
             const userValues = [];
 
@@ -93,15 +86,13 @@ export const updateSettings = (req, res) => {
                 db.prepare(sql).run(...userValues);
             }
 
-            // --- PART B: Update 'settings' table ---
             const settingUpdates = [];
             const settingValues = [];
 
             for (const key of Object.keys(data)) {
                 if (settingFields.includes(key)) {
                     settingUpdates.push(`${key} = ?`);
-                    
-                    // Convert booleans to integers for SQLite (true -> 1, false -> 0)
+
                     let val = data[key];
                     if (typeof val === 'boolean') {
                         val = val ? 1 : 0;
@@ -114,27 +105,23 @@ export const updateSettings = (req, res) => {
                 settingUpdates.push("updatedAt = CURRENT_TIMESTAMP");
                 settingValues.push(userId);
 
-                // We use userId here because settings.userId links to users.id
                 const sql = `UPDATE settings SET ${settingUpdates.join(', ')} WHERE userId = ?`;
                 const info = db.prepare(sql).run(...settingValues);
 
-                // Edge Case: If settings row doesn't exist yet (shouldn't happen with seed, but safe to check)
+                // Edge Case: If settings row doesn't exist yet 
                 if (info.changes === 0) {
-                   // Optional: Insert default logic if needed, but your seed handles this.
                    console.warn(`Warning: No settings found for user ${userId}`);
                 }
             }
         });
 
-        // Run the transaction
         updateTransaction(updates);
 
         res.json({ success: true, message: "Settings updated successfully" });
 
     } catch (error) {
         console.error("Settings Update Error:", error);
-        
-        // Check for specific SQLite constraints (like unique email)
+
         if (error.code === 'SQLITE_CONSTRAINT_UNIQUE') {
             return res.status(409).json({ error: "Email already in use" });
         }

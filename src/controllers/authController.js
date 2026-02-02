@@ -320,13 +320,9 @@ export const forgotPassword = async (req, res) => {
     const db = openDb();
 
     try {
-        // Check if user exists 
         const user = db.prepare('SELECT firstName, googleId FROM users WHERE email = ?').get(email);
 
         if (!user) {
-            // Security best practice: Don't explicitly say "User not found" to prevent email scraping.
-            // But for your UX, we will return success even if user isn't found (or you can show an error if you prefer).
-            // Let's return success to pretend we sent it.
             return res.json({ success: true, message: "If an account exists, a code has been sent." });
         }
 
@@ -334,17 +330,13 @@ export const forgotPassword = async (req, res) => {
             return res.status(400).json({ error: "This account uses Google Sign-In. Please sign in with Google." });
         }
 
-        // Generate 6-digit PIN
         const pin = Math.floor(100000 + Math.random() * 900000).toString();
-        
-        // Set Expiry (15 minutes from now)
+
         const expiresAt = new Date(Date.now() + 15 * 60 * 1000).toISOString();
 
-        // Save PIN to DB
         const stmt = db.prepare('INSERT INTO verification_codes (email, code, type, expiresAt) VALUES (?, ?, ?, ?)');
         stmt.run(email, pin, 'PASSWORD_RESET', expiresAt);
 
-        // Send Email via Brevo
         const sent = await sendEmail(email, user.firstName, pin, 'PASSWORD_RESET');
 
         if (!sent) throw new Error("Failed to send email via service");
@@ -357,7 +349,6 @@ export const forgotPassword = async (req, res) => {
     }
 };
 
-// 2. VERIFY PIN & RESET PASSWORD
 export const resetPasswordWithPin = async (req, res) => {
     const { email, code, newPassword } = req.body;
 
@@ -414,22 +405,16 @@ export const deleteAccount = async (req, res) => {
     const db = openDb();
 
     try {
-        // Fetch user including googleId
         const user = db.prepare('SELECT email, password, createdAt, googleId FROM users WHERE id = ?').get(userId);
 
         if (!user) {
             return res.status(404).json({ error: "User not found." });
         }
 
-        // === LOGIC BRANCH ===
-        // Case A: Google User (Has googleId) -> Skip password check
-        // Case B: Regular User -> Require password check
-        
         if (user.googleId) {
             // It's a Google user, allow deletion without password
             // (The session cookie proves their identity)
         } else {
-            // It's a standard user, enforce password check
             if (!password) {
                 return res.status(400).json({ error: "Password is required." });
             }
@@ -439,20 +424,15 @@ export const deleteAccount = async (req, res) => {
             }
         }
 
-        // ... Rest of the archive and delete logic remains the same ...
-        
-        // 1. Archive
         const archiveStmt = db.prepare(`
             INSERT INTO deleted_users (email, originalUserId, userCreatedAt) 
             VALUES (?, ?, ?)
         `);
         archiveStmt.run(user.email, userId, user.createdAt);
 
-        // 2. Delete
         const deleteStmt = db.prepare('DELETE FROM users WHERE id = ?');
         deleteStmt.run(userId);
 
-        // 3. Logout
         req.session.destroy((err) => {
             if (err) return res.status(500).json({ error: "Failed to log out." });
             res.clearCookie('connect.sid');
