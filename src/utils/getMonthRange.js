@@ -13,11 +13,11 @@ export function getMonthDateRange(offset = 0) {
   const label = targetDate.toLocaleString('default', { month: 'short' });
 
   // Start of month (e.g., 2026-01-01T00:00:00.000Z)
-  const start = new Date(year, month, 0, 24, 59, 59).toISOString();
+  const start = new Date(year, month, 0, 0, 0, 0).toISOString();
   
   // End of month (e.g., 2026-01-31T23:59:59.999Z)
   // We go to the 0th day of the NEXT month to get the last day of THIS month
-  const end = new Date(year, month + 1, 0, 24, 59, 59).toISOString();
+  const end = new Date(year, month + 1, -1, 24, 0, 0).toISOString();
 
   return { monthKey, label, start, end };
 }

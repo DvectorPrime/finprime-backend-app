@@ -23,10 +23,13 @@ export const getBudgetOverview = (req, res) => {
             FROM transactions 
             WHERE userId = ? 
             AND type = 'EXPENSE'
-            AND createdAt >= ? 
+            AND createdAt > ? 
             AND createdAt <= ?
             GROUP BY category
         `).all(userId, current.start, current.end);
+            
+        console.log(current)
+        console.log(expenses)
 
         const expenseMap = new Map(expenses.map(e => [e.category, e.total]));
 
@@ -51,7 +54,7 @@ export const getBudgetOverview = (req, res) => {
         const totalSpentResult = db.prepare(`
             SELECT SUM(amount) as total 
             FROM transactions 
-            WHERE userId = ? AND type = 'EXPENSE' AND createdAt >= ? AND createdAt <= ?
+            WHERE userId = ? AND type = 'EXPENSE' AND createdAt > ? AND createdAt <= ?
         `).get(userId, current.start, current.end);
         
         const totalSpent = totalSpentResult.total || 0;
@@ -71,7 +74,7 @@ export const getBudgetOverview = (req, res) => {
             const expenseResult = db.prepare(`
                 SELECT SUM(amount) as total 
                 FROM transactions 
-                WHERE userId = ? AND type = 'EXPENSE' AND createdAt >= ? AND createdAt <= ?
+                WHERE userId = ? AND type = 'EXPENSE' AND createdAt > ? AND createdAt <= ?
             `).get(userId, range.start, range.end);
 
             chartData.push({
