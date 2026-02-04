@@ -27,9 +27,6 @@ export const getBudgetOverview = (req, res) => {
             AND createdAt <= ?
             GROUP BY category
         `).all(userId, current.start, current.end);
-            
-        console.log(current)
-        console.log(expenses)
 
         const expenseMap = new Map(expenses.map(e => [e.category, e.total]));
 
