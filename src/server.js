@@ -1,5 +1,7 @@
 import express from 'express';
 import dotenv from 'dotenv';
+import connectPgSimple from 'connect-pg-simple';
+import { openDb } from './db/database.js';
 import cors from 'cors';
 import session from "express-session"
 
@@ -15,6 +17,9 @@ dotenv.config();
 const app = express();
 const PORT = process.env.PORT || 8000;
 
+const PgSession = connectPgSimple(session)
+const db = openDb()
+
 // Middleware
 app.use(cors({
   origin: 'http://localhost:3000', // Only allows your local frontend
@@ -25,15 +30,21 @@ app.use(cors({
 app.set('trust proxy', 1);
 
 app.use(session({
+  // CONNECT POSTGRES HERE ⬇️
+  store: new PgSession({
+    pool: db, // Use your existing connection pool
+    tableName: 'user_sessions', // We will create this table automatically
+    createTableIfMissing: true // Handy! Creates the table for you
+  }),
   secret: process.env.SECRETS,
   resave: false,
   saveUninitialized: false,
   cookie: {
     httpOnly: true,
-    secure: process.env.NODE_ENV === 'production', 
-    sameSite: process.env.NODE_ENV === 'production' ? 'lax' : 'lax', 
-    maxAge: 1000 * 60 * 60 * 24 
-  },
+    secure: process.env.NODE_ENV === 'production',
+    sameSite: 'lax',
+    maxAge: 1000 * 60 * 60 * 24 // 1 Day
+  }
 }));
 
 app.use(express.json());
