@@ -20,6 +20,8 @@ const PORT = process.env.PORT || 8000;
 const PgSession = connectPgSimple(session)
 const db = openDb()
 
+app.set('trust proxy', 1);
+
 // Middleware
 app.use(cors({
   origin: 'http://localhost:3000', // Only allows your local frontend
@@ -27,7 +29,6 @@ app.use(cors({
   credentials: true 
 }));
 
-app.set('trust proxy', 1);
 
 app.use(session({
   // CONNECT POSTGRES HERE ⬇️
@@ -42,7 +43,7 @@ app.use(session({
   cookie: {
     httpOnly: true,
     secure: process.env.NODE_ENV === 'production',
-    sameSite: 'lax',
+    sameSite: 'none',
     maxAge: 1000 * 60 * 60 * 24 // 1 Day
   }
 }));
