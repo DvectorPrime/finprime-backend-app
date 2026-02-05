@@ -10,7 +10,6 @@ async function initDatabase() {
     const db = openDb(); // This now returns the Postgres Pool
 
     // 1. Users Table
-    // changed: AUTOINCREMENT -> SERIAL, DATETIME -> TIMESTAMP, CURRENT_TIMESTAMP -> NOW()
     await db.query(`
       CREATE TABLE IF NOT EXISTS users (
         id SERIAL PRIMARY KEY,
@@ -56,7 +55,6 @@ async function initDatabase() {
     `);
 
     // 4. Settings Table
-    // changed: INTEGER (0/1) -> BOOLEAN (FALSE/TRUE)
     await db.query(`
       CREATE TABLE IF NOT EXISTS settings (
         id SERIAL PRIMARY KEY,
@@ -107,12 +105,27 @@ async function initDatabase() {
       );
     `);
 
+    // 8. User Sessions Table (Required for connect-pg-simple)
+    // ⚠️ This is the critical missing piece for Render!
+    await db.query(`
+      CREATE TABLE IF NOT EXISTS "user_sessions" (
+        "sid" varchar NOT NULL COLLATE "default",
+        "sess" json NOT NULL,
+        "expire" timestamp(6) NOT NULL,
+        CONSTRAINT "session_pkey" PRIMARY KEY ("sid")
+      );
+    `);
+
+    // Create an index for faster session lookups
+    await db.query(`
+      CREATE INDEX IF NOT EXISTS "IDX_session_expire" ON "user_sessions" ("expire");
+    `);
+
     console.log('✅ PostgreSQL database initialized successfully!');
   } catch (err) {
     console.error('❌ Error initializing database:', err);
     process.exit(1);
   } finally {
-    // We await the close function to ensure connections are cut cleanly
     closeDb();
   }
 }
