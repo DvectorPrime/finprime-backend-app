@@ -6,7 +6,7 @@
   "main": "src/server.js",
   "scripts": {
     "dev": "nodemon src/server.js",
-    "start": "node src/server.js",
+    "start": "node src/db/init.js && node src/server.js",
     "db:init": "node src/db/init.js",
     "db:seed": "node src/db/seed.js",
     "db:drop": "node src/db/dropTable.js",
@@ -29,6 +29,7 @@
     "google-auth-library": "^10.5.0",
     "jsonwebtoken": "^9.0.3",
     "multer": "^2.0.2",
+    "pg": "^8.18.0",
     "sqlite": "^5.1.1",
     "streamifier": "^0.1.1"
   },

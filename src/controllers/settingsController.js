@@ -1,6 +1,6 @@
 import { openDb } from '../db/database.js';
 
-export const getSettings = (req, res) => {
+export const getSettings = async (req, res) => {
     const userId = req.session.userId;
 
     if (!userId) {
@@ -10,31 +10,34 @@ export const getSettings = (req, res) => {
     const db = openDb();
 
     try {
-        const data = db.prepare(`
+        const query = `
             SELECT 
-                u.firstName, 
-                u.lastName, 
+                u."firstName", 
+                u."lastName", 
                 u.email, 
                 u.avatar,
-                s.themePreference, 
+                s."themePreference", 
                 s.currency, 
-                s.aiInsights, 
-                s.budgetAlerts
+                s."aiInsights", 
+                s."budgetAlerts"
             FROM users u
-            LEFT JOIN settings s ON u.id = s.userId
-            WHERE u.id = ?
-        `).get(userId);
+            LEFT JOIN settings s ON u.id = s."userId"
+            WHERE u.id = $1
+        `;
+
+        const result = await db.query(query, [userId]);
+        const data = result.rows[0];
 
         if (!data) {
             return res.status(404).json({ error: "User not found" });
         }
 
-        // SQLite stores booleans as 0 or 1.
-        // We convert them back to true/false for the Frontend React components.
+        // Postgres returns actual Booleans, so we don't need to convert 1/0
         const formattedData = {
             ...data,
-            aiInsights: Boolean(data.aiInsights),   // 1 -> true, 0 -> false
-            budgetAlerts: Boolean(data.budgetAlerts),
+            // Ensure defaults if null
+            aiInsights: data.aiInsights ?? true, 
+            budgetAlerts: data.budgetAlerts ?? false,
             themePreference: data.themePreference || 'System',
             currency: data.currency || 'NGN'
         };
@@ -47,7 +50,7 @@ export const getSettings = (req, res) => {
     }
 };
 
-export const updateSettings = (req, res) => {
+export const updateSettings = async (req, res) => {
     const userId = req.session.userId;
     if (!userId) {
         return res.status(401).json({ error: "Unauthorized" });
@@ -59,73 +62,80 @@ export const updateSettings = (req, res) => {
     }
 
     const db = openDb();
+    
+    // ⚠️ Get a dedicated client for the transaction
+    const client = await db.connect();
 
     const userFields = ['firstName', 'lastName', 'avatar'];
     const settingFields = ['themePreference', 'currency', 'aiInsights', 'budgetAlerts'];
 
     try {
-        const updateTransaction = db.transaction((data) => {
+        await client.query('BEGIN'); // Start Transaction
+
+        // --- 1. UPDATE USERS TABLE ---
+        const userUpdates = [];
+        const userValues = [];
+        let uIdx = 1; // Placeholder counter ($1, $2...)
+
+        for (const key of Object.keys(updates)) {
+            if (userFields.includes(key)) {
+                userUpdates.push(`"${key}" = $${uIdx}`);
+                userValues.push(updates[key]);
+                uIdx++;
+            }
+        }
+
+        if (userUpdates.length > 0) {
+            // Add Timestamp
+            userUpdates.push(`"updatedAt" = NOW()`);
             
-            const userUpdates = [];
-            const userValues = [];
+            // Add ID for WHERE clause
+            userValues.push(userId);
+            
+            const sql = `UPDATE users SET ${userUpdates.join(', ')} WHERE id = $${uIdx}`;
+            await client.query(sql, userValues);
+        }
 
-            for (const key of Object.keys(data)) {
-                if (userFields.includes(key)) {
-                    userUpdates.push(`${key} = ?`);
-                    userValues.push(data[key]);
-                }
+        // --- 2. UPDATE SETTINGS TABLE ---
+        const settingUpdates = [];
+        const settingValues = [];
+        let sIdx = 1; // Reset counter for new query
+
+        for (const key of Object.keys(updates)) {
+            if (settingFields.includes(key)) {
+                settingUpdates.push(`"${key}" = $${sIdx}`);
+                settingValues.push(updates[key]); // Postgres handles boolean true/false automatically
+                sIdx++;
             }
+        }
 
-            if (userUpdates.length > 0) {
-                // Add updatedAt timestamp
-                userUpdates.push("updatedAt = CURRENT_TIMESTAMP");
-                // Add userId to the end of the values array for the WHERE clause
-                userValues.push(userId);
+        if (settingUpdates.length > 0) {
+            settingUpdates.push(`"updatedAt" = NOW()`);
+            settingValues.push(userId);
 
-                const sql = `UPDATE users SET ${userUpdates.join(', ')} WHERE id = ?`;
-                db.prepare(sql).run(...userValues);
+            const sql = `UPDATE settings SET ${settingUpdates.join(', ')} WHERE "userId" = $${sIdx}`;
+            const info = await client.query(sql, settingValues);
+
+            // Edge Case: Settings row might not exist (though init/auth should have created it)
+            if (info.rowCount === 0) {
+                 console.warn(`Warning: No settings found for user ${userId}`);
             }
+        }
 
-            const settingUpdates = [];
-            const settingValues = [];
-
-            for (const key of Object.keys(data)) {
-                if (settingFields.includes(key)) {
-                    settingUpdates.push(`${key} = ?`);
-
-                    let val = data[key];
-                    if (typeof val === 'boolean') {
-                        val = val ? 1 : 0;
-                    }
-                    settingValues.push(val);
-                }
-            }
-
-            if (settingUpdates.length > 0) {
-                settingUpdates.push("updatedAt = CURRENT_TIMESTAMP");
-                settingValues.push(userId);
-
-                const sql = `UPDATE settings SET ${settingUpdates.join(', ')} WHERE userId = ?`;
-                const info = db.prepare(sql).run(...settingValues);
-
-                // Edge Case: If settings row doesn't exist yet 
-                if (info.changes === 0) {
-                   console.warn(`Warning: No settings found for user ${userId}`);
-                }
-            }
-        });
-
-        updateTransaction(updates);
-
+        await client.query('COMMIT'); // Commit Transaction
         res.json({ success: true, message: "Settings updated successfully" });
 
     } catch (error) {
+        await client.query('ROLLBACK'); // Rollback on error
         console.error("Settings Update Error:", error);
 
-        if (error.code === 'SQLITE_CONSTRAINT_UNIQUE') {
+        // Postgres Error Code 23505 is Unique Violation
+        if (error.code === '23505') {
             return res.status(409).json({ error: "Email already in use" });
         }
 
         res.status(500).json({ error: "Failed to update settings" });
+    } finally {
+        client.release(); // Release client back to pool
     }
 };

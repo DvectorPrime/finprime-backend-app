@@ -1,29 +1,43 @@
-import Database from 'better-sqlite3';
-import path from 'path';
+import pkg from 'pg';
+import dotenv from 'dotenv';
 
-let db = null;
+// Load .env variables locally
+dotenv.config();
+
+// Destructure Pool from the pg package
+const { Pool } = pkg;
+
+// Singleton to hold the pool instance
+let pool = null;
 
 export function openDb() {
-  // If database is already open, return the existing instance
-  if (db) return db;
+  // If the pool already exists, return it (Singleton pattern)
+  if (pool) return pool;
 
-  // Resolve the full path to the database file
-  const dbPath = path.join(process.cwd(), process.env.DATABASE_PATH || 'database.db');
+  // 1. Determine if we are in Production (Render) or Development (Local)
+  const isProduction = process.env.NODE_ENV === 'production';
 
-  // Open the database
-  db = new Database(dbPath, { 
-    // verbose: console.log
+  // 2. Get the Connection String
+  // On Render, 'DATABASE_URL' is provided automatically.
+  // Locally, we fallback to your local machine's string.
+  const connectionString = process.env.DATABASE_URL; 
+
+  // 3. Create the Pool
+  pool = new Pool({
+    connectionString,
+    // Render requires SSL for Postgres. Local usually does not.
+    ssl: isProduction ? { rejectUnauthorized: false } : false,
   });
 
-  // Enable foreign keys
-  db.pragma('foreign_keys = ON');
+  // Note: We don't need "db.pragma('foreign_keys = ON')" anymore.
+  // PostgreSQL enforces foreign keys by default!
 
-  return db;
+  return pool;
 }
 
 export function closeDb() {
-  if (db) {
-    db.close();
-    db = null;
+  if (pool) {
+    pool.end(); // Closes all connections in the pool
+    pool = null;
   }
 }

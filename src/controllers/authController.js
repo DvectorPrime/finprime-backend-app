@@ -1,165 +1,169 @@
-import bcrypt from "bcryptjs"
-import { openDb } from "../db/database.js"
-import { sendEmail } from "../utils/emailService.js"
+import bcrypt from "bcryptjs";
+import { openDb } from "../db/database.js";
+import { sendEmail } from "../utils/emailService.js";
 
+// --- ME CONTROLLER (Check Session) ---
 export async function meController(req, res) {
-    const db = openDb()
-    const id = req.session.userId
+    const db = openDb();
+    const id = req.session.userId;
 
-    if (!id){
-        return res.json({ isAuthenticated : false, user: null})
-    }
-
-    const stmt = db.prepare(`
-        SELECT 
-            u.firstName, u.lastName, u.email, u.avatar, u.googleId, u.password, -- Get password field
-            s.themePreference, s.currency, s.aiInsights, s.budgetAlerts
-        FROM users u
-        LEFT JOIN settings s ON u.id = s.userId
-        WHERE u.id = ?
-    `)
-    
-    const data = stmt.get(id) || null
-
-    if (!data){
-        return res.status(401).json({ isAuthenticated: false, error : "User Not Found."})
-    }
-
-    if (!data){
-        return res.status(401).json({ isAuthenticated: false, error : "User Not Found."})
-    }
-
-    return res.json({ 
-        isAuthenticated : true, 
-        user: {
-            firstName: data.firstName,
-            lastName: data.lastName,
-            email: data.email,
-            avatarUrl: data.avatar || "", 
-            themePreference: data.themePreference || "System",
-            currencyPreference: data.currency || "NGN",
-            aiInsights: data.aiInsights === 1,
-            budgetAlerts: data.budgetAlerts === 1,
-            // NEW FLAG: Frontend uses this to decide whether to show Password input
-            isGoogleAccount: !!data.googleId, 
-            hasPassword: !!data.password && data.password.length > 0
-        }
-    })
-}
-
-export async function login(req, res) {
-    const db = openDb()
-
-    const { email, password } = req.body
-
-    const emailRegex = /^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$/
-    
-    if (!emailRegex.test(email)){
-        return res.status(400).json({error : "Invalid Email Address"})
+    if (!id) {
+        return res.json({ isAuthenticated: false, user: null });
     }
 
     try {
-        const idStmt = db.prepare('SELECT id, password AS hash FROM users WHERE email = ?')
-    
-        const data = idStmt.get(email) || {id : null, hash : null}
-    
-        if (!data.id){ // Fixed check to look for ID specifically
-            return res.status(400).json({error : "User not found"})
-        }
-    
-        const isPasswordValid = await bcrypt.compare(password, data.hash)
-    
-        if (!isPasswordValid){
-            return res.status(400).json({error : "Incorrect Password"})
-        }
-    
-        req.session.userId = data.id
-    
-        console.log("Login User ID:", req.session.userId)
-    
-        res.json({message: "Login Succesful"})
-    } catch (err) {
-        console.error("Login Error:", err)
-        return res.status(500).json({error: "An error occcured"})
-    }
+        const query = `
+            SELECT 
+                u."firstName", u."lastName", u.email, u.avatar, u."googleId", u.password, 
+                s."themePreference", s.currency, s."aiInsights", s."budgetAlerts"
+            FROM users u
+            LEFT JOIN settings s ON u.id = s."userId"
+            WHERE u.id = $1
+        `;
 
+        const result = await db.query(query, [id]);
+        const data = result.rows[0];
+
+        if (!data) {
+            return res.status(401).json({ isAuthenticated: false, error: "User Not Found." });
+        }
+
+        return res.json({
+            isAuthenticated: true,
+            user: {
+                firstName: data.firstName,
+                lastName: data.lastName,
+                email: data.email,
+                avatarUrl: data.avatar || "",
+                themePreference: data.themePreference || "System",
+                currencyPreference: data.currency || "NGN",
+                aiInsights: data.aiInsights === true, 
+                budgetAlerts: data.budgetAlerts === true,
+                isGoogleAccount: !!data.googleId,
+                hasPassword: !!data.password && data.password.length > 0
+            }
+        });
+    } catch (err) {
+        console.error("Me Controller Error:", err);
+        return res.status(500).json({ error: "Internal Server Error" });
+    }
 }
 
-export async function register(req, res){
+// --- LOGIN ---
+export async function login(req, res) {
     const db = openDb();
+    const { email, password } = req.body;
 
-    // Now accepting 'code' from frontend
+    const emailRegex = /^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$/;
+    
+    if (!emailRegex.test(email)) {
+        return res.status(400).json({ error: "Invalid Email Address" });
+    }
+
+    try {
+        const result = await db.query('SELECT id, password AS hash FROM users WHERE email = $1', [email]);
+        const data = result.rows[0];
+
+        if (!data) {
+            return res.status(400).json({ error: "User not found" });
+        }
+
+        const isPasswordValid = await bcrypt.compare(password, data.hash);
+
+        if (!isPasswordValid) {
+            return res.status(400).json({ error: "Incorrect Password" });
+        }
+
+        req.session.userId = data.id;
+        console.log("Login User ID:", req.session.userId);
+
+        res.json({ message: "Login Successful" });
+
+    } catch (err) {
+        console.error("Login Error:", err);
+        return res.status(500).json({ error: "An error occurred" });
+    }
+}
+
+// --- REGISTER ---
+export async function register(req, res) {
+    const db = openDb();
     let { firstName, lastName, email, password, code } = req.body;
 
-    if (!firstName ||!lastName || !email || !password || !code) {
-        return res.status(400).json({error: "All fields including verification code are required"});
-    }
-
-    // --- VERIFICATION STEP ---
-    const validCode = db.prepare(`
-        SELECT id FROM verification_codes 
-        WHERE email = ? AND code = ? AND type = 'REGISTRATION' 
-        AND expiresAt > datetime('now')
-        ORDER BY createdAt DESC LIMIT 1
-    `).get(email, code);
-
-    if (!validCode) {
-        return res.status(400).json({ error: "Invalid or expired verification code" });
-    }
-    // -------------------------
-
-    firstName = firstName.split(" ")[0]; 
-    const passwordHash = await bcrypt.hash(password, 10);
-
-    // Double check user doesn't exist (race condition safety)
-    const emailExists = db.prepare('SELECT email FROM users WHERE email = ?').get(email);
-    if (emailExists){
-        return res.status(400).json({error : "User already exists"});
+    if (!firstName || !lastName || !email || !password || !code) {
+        return res.status(400).json({ error: "All fields including verification code are required" });
     }
 
     try {
-        // Create User
-        const createUserStatement = db.prepare('INSERT INTO users (email, firstName, lastName, password, avatar) VALUES (?, ?, ?, ?, ?)');
-        const results = createUserStatement.run(email, firstName, lastName, passwordHash, "");
-        const userId = results.lastInsertRowid;
+        // 1. VERIFICATION STEP
+        // FIX: Replaced NOW() with $3 (currentTime) to ensure timezone consistency
+        const currentTime = new Date().toISOString();
+        
+        const codeRes = await db.query(`
+            SELECT id FROM verification_codes 
+            WHERE email = $1 AND code = $2 AND type = 'REGISTRATION' 
+            AND "expiresAt" > $3
+            ORDER BY "createdAt" DESC LIMIT 1
+        `, [email, code.toString(), currentTime]);
 
-        // Create Default Settings
-        db.prepare('INSERT INTO settings (userId) VALUES (?)').run(userId);
+        const validCode = codeRes.rows[0];
 
-        // Cleanup: Delete used verification code
-        db.prepare('DELETE FROM verification_codes WHERE id = ?').run(validCode.id);
+        if (!validCode) {
+            return res.status(400).json({ error: "Invalid or expired verification code" });
+        }
+
+        firstName = firstName.split(" ")[0];
+        const passwordHash = await bcrypt.hash(password, 10);
+
+        // 2. Check for existing user
+        const existingUserRes = await db.query('SELECT email FROM users WHERE email = $1', [email]);
+        if (existingUserRes.rows.length > 0) {
+            return res.status(400).json({ error: "User already exists" });
+        }
+
+        // 3. Create User
+        const insertUserRes = await db.query(`
+            INSERT INTO users (email, "firstName", "lastName", password, avatar) 
+            VALUES ($1, $2, $3, $4, $5)
+            RETURNING id
+        `, [email, firstName, lastName, passwordHash, ""]);
+        
+        const userId = insertUserRes.rows[0].id;
+
+        // 4. Create Settings
+        await db.query('INSERT INTO settings ("userId") VALUES ($1)', [userId]);
+
+        // 5. Cleanup Code
+        await db.query('DELETE FROM verification_codes WHERE id = $1', [validCode.id]);
 
         req.session.userId = userId;
-        return res.json({success : "Account Verified & Created Successfully", firstName : firstName});
-        
+        return res.json({ success: "Account Verified & Created Successfully", firstName });
+
     } catch (err) {
         console.error("Registration Error", err);
         return res.status(500).json({ error: "Database error during registration" });
     }
 }
 
+// --- SEND CODE ---
 export async function sendRegistrationCode(req, res) {
     const { email, firstName } = req.body;
     const db = openDb();
 
-    // Check if user already exists
-    const user = db.prepare('SELECT id FROM users WHERE email = ?').get(email);
-    if (user) {
-        return res.status(400).json({ error: "User already exists. Please login." });
-    }
-
-    // Generate 6-digit Code
-    const code = Math.floor(100000 + Math.random() * 900000).toString();
-    const expiresAt = new Date(Date.now() + 15 * 60000).toISOString(); // 15 mins
-
     try {
-        // Save code to DB
-        db.prepare(`
-            INSERT INTO verification_codes (email, code, type, expiresAt) 
-            VALUES (?, ?, 'REGISTRATION', ?)
-        `).run(email, code, expiresAt);
+        const userRes = await db.query('SELECT id FROM users WHERE email = $1', [email]);
+        if (userRes.rows.length > 0) {
+            return res.status(400).json({ error: "User already exists. Please login." });
+        }
 
-        // Send Email
+        const code = Math.floor(100000 + Math.random() * 900000).toString();
+        const expiresAt = new Date(Date.now() + 15 * 60000).toISOString(); 
+
+        await db.query(`
+            INSERT INTO verification_codes (email, code, type, "expiresAt") 
+            VALUES ($1, $2, 'REGISTRATION', $3)
+        `, [email, code, expiresAt]);
+
         const emailSent = await sendEmail(email, firstName, code, 'REGISTRATION');
         
         if (!emailSent) throw new Error("Failed to send email via Brevo");
@@ -171,107 +175,94 @@ export async function sendRegistrationCode(req, res) {
     }
 }
 
-export async function googleAuth(req, res){
-    const {code} = req.body
-
-    const db = openDb()
-
-    let googleUser
+// --- GOOGLE AUTH ---
+export async function googleAuth(req, res) {
+    const { code } = req.body;
+    const db = openDb();
+    let googleUser;
 
     try {
         const tokenResponse = await fetch("https://oauth2.googleapis.com/token", {
             method: 'POST',
-            headers: {
-            'Content-Type': 'application/json',
-            },
+            headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
-            code,
-            client_id: process.env.GOOGLE_CLIENT_ID,
-            client_secret: process.env.GOOGLE_CLIENT_SECRET,
-            redirect_uri: 'http://localhost:3000/login', 
-            grant_type: 'authorization_code',
+                code,
+                client_id: process.env.GOOGLE_CLIENT_ID,
+                client_secret: process.env.GOOGLE_CLIENT_SECRET,
+                redirect_uri: 'http://localhost:3000/login',
+                grant_type: 'authorization_code',
             })
-        })
-    
-        if (!tokenResponse.ok){
-            const errorData = await tokenResponse.json()
-            console.log(`Google Token Error: ${errorData.error_description || tokenResponse.statusText}`)
+        });
+
+        if (!tokenResponse.ok) {
+            const errorData = await tokenResponse.json();
             throw new Error(`Google Token Error: ${errorData.error_description || tokenResponse.statusText}`);
         }
-    
-        const googleTokens = await tokenResponse.json()
-    
+
+        const googleTokens = await tokenResponse.json();
+
         const userResponse = await fetch('https://www.googleapis.com/oauth2/v1/userinfo', {
             method: 'GET',
-            headers: {
-            Authorization: `Bearer ${googleTokens.access_token}`,
-            },
+            headers: { Authorization: `Bearer ${googleTokens.access_token}` },
         });
-    
-        if (!userResponse.ok) {
-            throw new Error(`Google User Info Error: ${userResponse.statusText}`);
-        }
-    
+
+        if (!userResponse.ok) throw new Error(`Google User Info Error: ${userResponse.statusText}`);
+
         googleUser = await userResponse.json();
-        const findUser = db.prepare('SELECT * FROM users WHERE googleId = ? OR email = ?')
-        let user = findUser.get(googleUser.id, googleUser.email)
-    
+
+        const findUserRes = await db.query(
+            'SELECT * FROM users WHERE "googleId" = $1 OR email = $2', 
+            [googleUser.id, googleUser.email]
+        );
+        let user = findUserRes.rows[0];
+
         if (user) {
-            // Link account if email matches but googleId is missing
-            if(!user.googleId){
-                const linkAccount = db.prepare('UPDATE users SET googleId = ?, avatar = ? WHERE email = ?')
-                linkAccount.run(googleUser.id, googleUser.picture, googleUser.email)
+            if (!user.googleId) {
+                await db.query(
+                    'UPDATE users SET "googleId" = $1, avatar = $2 WHERE email = $3', 
+                    [googleUser.id, googleUser.picture, googleUser.email]
+                );
                 
-                // Optional: Check if they have settings (in case they registered before this update)
-                const checkSettings = db.prepare('SELECT id FROM settings WHERE userId = ?').get(user.id);
-                if (!checkSettings) {
-                     db.prepare('INSERT INTO settings (userId) VALUES (?)').run(user.id);
+                const settingsRes = await db.query('SELECT id FROM settings WHERE "userId" = $1', [user.id]);
+                if (settingsRes.rows.length === 0) {
+                     await db.query('INSERT INTO settings ("userId") VALUES ($1)', [user.id]);
                 }
             }
         } else {
-            // Create NEW User
-            const createUser = db.prepare(`
-                INSERT INTO users (email, googleId, firstName, lastName, avatar) 
-                VALUES (?, ?, ?, ?, ?)
-            `);
-    
-            const result = createUser.run(
-                googleUser.email,
-                googleUser.id,
-                googleUser.given_name,
-                googleUser.family_name,
-                googleUser.picture
-            );
+            const insertRes = await db.query(`
+                INSERT INTO users (email, "googleId", "firstName", "lastName", avatar) 
+                VALUES ($1, $2, $3, $4, $5)
+                RETURNING id
+            `, [googleUser.email, googleUser.id, googleUser.given_name, googleUser.family_name, googleUser.picture]);
             
-            const newUserId = result.lastInsertRowid;
+            const newUserId = insertRes.rows[0].id;
 
-            // UPDATED: Create Default Settings for this new user
-            const createSettingsStmt = db.prepare('INSERT INTO settings (userId) VALUES (?)')
-            createSettingsStmt.run(newUserId)
-
-            user = db.prepare('SELECT * FROM users WHERE id = ?').get(newUserId)
+            await db.query('INSERT INTO settings ("userId") VALUES ($1)', [newUserId]);
+            user = { id: newUserId };
         }
 
-        req.session.userId = user.id
-        res.json({success : "Authentication Successful"})
+        req.session.userId = user.id;
+        res.json({ success: "Authentication Successful" });
+
     } catch (err) {
-        console.log({error : err.message})
-        return res.status(500).json({ error: "Authentication Failed due to server Error. Try again later" })
+        console.log({ error: err.message });
+        return res.status(500).json({ error: "Authentication Failed due to server Error." });
     }
 }
 
+// --- LOGOUT ---
 export async function logOutUser(req, res) {
     req.session.destroy(() => {
-        res.json({message: 'Logged out'})
-    })
+        res.json({ message: 'Logged out' });
+    });
 }
 
+// --- CHANGE PASSWORD ---
 export const changePassword = async (req, res) => {
     const { currentPassword, newPassword } = req.body;
     const userId = req.session.userId;
 
     if (!userId) return res.status(401).json({ error: "Unauthorized." });
-
     if (!newPassword || newPassword.length < 6) {
         return res.status(400).json({ error: "New password must be at least 6 characters." });
     }
@@ -279,13 +270,13 @@ export const changePassword = async (req, res) => {
     const db = openDb();
 
     try {
-        const user = db.prepare('SELECT password FROM users WHERE id = ?').get(userId);
+        const userRes = await db.query('SELECT password FROM users WHERE id = $1', [userId]);
+        const user = userRes.rows[0];
+
         if (!user) return res.status(404).json({ error: "User not found." });
 
         const userHasPassword = !!user.password && user.password.length > 0;
 
-        // === LOGIC BRANCH ===
-        // If user HAS a password, they MUST provide the correct current one.
         if (userHasPassword) {
             if (!currentPassword) {
                 return res.status(400).json({ error: "Current password is required." });
@@ -294,14 +285,10 @@ export const changePassword = async (req, res) => {
             if (!isMatch) {
                 return res.status(401).json({ error: "Incorrect current password." });
             }
-        } 
-        // If user has NO password (Google only), we SKIP the check and let them set one.
+        }
 
-        // Hash new password
         const hashedPassword = await bcrypt.hash(newPassword, 10);
-
-        // Update DB
-        db.prepare('UPDATE users SET password = ? WHERE id = ?').run(hashedPassword, userId);
+        await db.query('UPDATE users SET password = $1 WHERE id = $2', [hashedPassword, userId]);
 
         return res.json({ success: true, message: "Password updated successfully." });
 
@@ -311,16 +298,16 @@ export const changePassword = async (req, res) => {
     }
 };
 
-// 1. REQUEST PASSWORD RESET (Sends PIN)
+// --- FORGOT PASSWORD ---
 export const forgotPassword = async (req, res) => {
     const { email } = req.body;
-    
     if (!email) return res.status(400).json({ error: "Email is required." });
 
     const db = openDb();
 
     try {
-        const user = db.prepare('SELECT firstName, googleId FROM users WHERE email = ?').get(email);
+        const userRes = await db.query('SELECT "firstName", "googleId" FROM users WHERE email = $1', [email]);
+        const user = userRes.rows[0];
 
         if (!user) {
             return res.json({ success: true, message: "If an account exists, a code has been sent." });
@@ -331,15 +318,15 @@ export const forgotPassword = async (req, res) => {
         }
 
         const pin = Math.floor(100000 + Math.random() * 900000).toString();
-
         const expiresAt = new Date(Date.now() + 15 * 60 * 1000).toISOString();
 
-        const stmt = db.prepare('INSERT INTO verification_codes (email, code, type, expiresAt) VALUES (?, ?, ?, ?)');
-        stmt.run(email, pin, 'PASSWORD_RESET', expiresAt);
+        await db.query(`
+            INSERT INTO verification_codes (email, code, type, "expiresAt") 
+            VALUES ($1, $2, 'PASSWORD_RESET', $3)
+        `, [email, pin, expiresAt]);
 
         const sent = await sendEmail(email, user.firstName, pin, 'PASSWORD_RESET');
-
-        if (!sent) throw new Error("Failed to send email via service");
+        if (!sent) throw new Error("Failed to send email");
 
         res.json({ success: true, message: "Verification code sent to your email." });
 
@@ -349,41 +336,39 @@ export const forgotPassword = async (req, res) => {
     }
 };
 
+// --- RESET PASSWORD ---
 export const resetPasswordWithPin = async (req, res) => {
     const { email, code, newPassword } = req.body;
 
-    if (!email || !code || !newPassword) {
-        return res.status(400).json({ error: "All fields are required." });
-    }
-
-    if (newPassword.length < 6) {
-        return res.status(400).json({ error: "Password must be at least 6 characters." });
-    }
+    if (!email || !code || !newPassword) return res.status(400).json({ error: "All fields required." });
+    if (newPassword.length < 6) return res.status(400).json({ error: "Password too short." });
 
     const db = openDb();
 
     try {
         // 1. Verify Code
-        const validCode = db.prepare(`
+        // FIX: Replaced NOW() with $3 (currentTime) to ensure timezone consistency
+        const currentTime = new Date().toISOString();
+
+        const codeRes = await db.query(`
             SELECT id FROM verification_codes 
-            WHERE email = ? AND code = ? AND type = 'PASSWORD_RESET' 
-            AND expiresAt > datetime('now')
-            ORDER BY createdAt DESC LIMIT 1
-        `).get(email, code);
+            WHERE email = $1 AND code = $2 AND type = 'PASSWORD_RESET' 
+            AND "expiresAt" > $3
+            ORDER BY "createdAt" DESC LIMIT 1
+        `, [email, code, currentTime]);
+
+        const validCode = codeRes.rows[0];
 
         if (!validCode) {
             return res.status(400).json({ error: "Invalid or expired verification code." });
         }
 
-        // 2. Hash New Password
+        // 2. Hash & Update
         const hashedPassword = await bcrypt.hash(newPassword, 10);
+        await db.query('UPDATE users SET password = $1 WHERE email = $2', [hashedPassword, email]);
 
-        // 3. Update User Password
-        const updateStmt = db.prepare('UPDATE users SET password = ? WHERE email = ?');
-        updateStmt.run(hashedPassword, email);
-
-        // 4. Cleanup: Delete used code
-        db.prepare('DELETE FROM verification_codes WHERE id = ?').run(validCode.id);
+        // 3. Cleanup
+        await db.query('DELETE FROM verification_codes WHERE id = $1', [validCode.id]);
 
         res.json({ success: true, message: "Password reset successfully. You can now login." });
 
@@ -393,45 +378,33 @@ export const resetPasswordWithPin = async (req, res) => {
     }
 };
 
-
+// --- DELETE ACCOUNT ---
 export const deleteAccount = async (req, res) => {
     const { password } = req.body;
     const userId = req.session.userId;
 
-    if (!userId) {
-        return res.status(401).json({ error: "Unauthorized." });
-    }
+    if (!userId) return res.status(401).json({ error: "Unauthorized." });
 
     const db = openDb();
 
     try {
-        const user = db.prepare('SELECT email, password, createdAt, googleId FROM users WHERE id = ?').get(userId);
+        const userRes = await db.query('SELECT email, password, "createdAt", "googleId" FROM users WHERE id = $1', [userId]);
+        const user = userRes.rows[0];
 
-        if (!user) {
-            return res.status(404).json({ error: "User not found." });
-        }
+        if (!user) return res.status(404).json({ error: "User not found." });
 
-        if (user.googleId) {
-            // It's a Google user, allow deletion without password
-            // (The session cookie proves their identity)
-        } else {
-            if (!password) {
-                return res.status(400).json({ error: "Password is required." });
-            }
+        if (!user.googleId) {
+            if (!password) return res.status(400).json({ error: "Password is required." });
             const isMatch = await bcrypt.compare(password, user.password);
-            if (!isMatch) {
-                return res.status(401).json({ error: "Incorrect password." });
-            }
+            if (!isMatch) return res.status(401).json({ error: "Incorrect password." });
         }
 
-        const archiveStmt = db.prepare(`
-            INSERT INTO deleted_users (email, originalUserId, userCreatedAt) 
-            VALUES (?, ?, ?)
-        `);
-        archiveStmt.run(user.email, userId, user.createdAt);
+        await db.query(`
+            INSERT INTO deleted_users (email, "originalUserId", "userCreatedAt") 
+            VALUES ($1, $2, $3)
+        `, [user.email, userId, user.createdAt]);
 
-        const deleteStmt = db.prepare('DELETE FROM users WHERE id = ?');
-        deleteStmt.run(userId);
+        await db.query('DELETE FROM users WHERE id = $1', [userId]);
 
         req.session.destroy((err) => {
             if (err) return res.status(500).json({ error: "Failed to log out." });

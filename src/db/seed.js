@@ -36,6 +36,7 @@ function getStrategicDate(type) {
     const day = Math.floor(Math.random() * now.getDate()) + 1;
     return new Date(year, month, day).toISOString();
   } else {
+    // Correctly handle previous month logic
     const daysInPrevMonth = new Date(year, month, 0).getDate(); 
     const day = Math.floor(Math.random() * daysInPrevMonth) + 1;
     return new Date(year, month - 1, day).toISOString();
@@ -46,8 +47,28 @@ function getRandomAmount(min, max) {
   return (Math.random() * (max - min) + min).toFixed(2);
 }
 
+// 🆕 Helper to Create Transaction (Async for Postgres)
+async function createRandomTransaction(db, userId, period) {
+  const isIncome = Math.random() > 0.75;
+  const type = isIncome ? 'INCOME' : 'EXPENSE';
+  const category = isIncome ? getRandomItem(incomeCategories) : getRandomItem(expenseCategories);
+  
+  const amount = isIncome 
+    ? getRandomAmount(50000, 200000) 
+    : getRandomAmount(1000, 50000);
+
+  const transactionName = `${category} - ${period === 'CURRENT_MONTH' ? 'Recent' : 'Old'}`;
+  const notes = `Seeded data for ${period}`;
+  const createdAt = getStrategicDate(period);
+
+  await db.query(`
+    INSERT INTO transactions ("userId", "transactionName", amount, type, category, notes, "createdAt")
+    VALUES ($1, $2, $3, $4, $5, $6, $7)
+  `, [userId, transactionName, amount, type, category, notes, createdAt]);
+}
+
 async function seedDatabase() {
-  console.log('🌱 Starting seeding...');
+  console.log('🌱 Starting PostgreSQL seeding...');
 
   const db = openDb();
 
@@ -58,7 +79,7 @@ async function seedDatabase() {
       password: await bcrypt.hash('password123', 10),
       firstName: 'Admin',
       lastName: 'User',
-      avatar: '' // Empty string as requested
+      avatar: '' 
     },
     {
       email: 'user@example.com',
@@ -69,30 +90,28 @@ async function seedDatabase() {
     }
   ];
 
-  const insertUserStmt = db.prepare(`
-    INSERT OR IGNORE INTO users (email, password, firstName, lastName, avatar) 
-    VALUES (?, ?, ?, ?, ?)
-  `);
-
   for (const user of users) {
-    const info = insertUserStmt.run(user.email, user.password, user.firstName, user.lastName, user.avatar);
-    if (info.changes > 0) {
+    // Postgres doesn't have "INSERT OR IGNORE", so we use "ON CONFLICT DO NOTHING"
+    const res = await db.query(`
+      INSERT INTO users (email, password, "firstName", "lastName", avatar) 
+      VALUES ($1, $2, $3, $4, $5)
+      ON CONFLICT (email) DO NOTHING
+    `, [user.email, user.password, user.firstName, user.lastName, user.avatar]);
+
+    if (res.rowCount > 0) {
       console.log(`👤 Added user: ${user.email}`);
     } else {
       console.log(`⚠️  Skipped existing user: ${user.email}`);
     }
   }
 
-  const allUsers = db.prepare('SELECT id, email FROM users').all();
+  // Fetch all users to get their IDs
+  const allUsersRes = await db.query('SELECT id, email FROM users');
+  const allUsers = allUsersRes.rows;
 
   // --- PART 2: SEED BUDGETS ---
   console.log('📉 Seeding budgets...');
   
-  const insertBudgetStmt = db.prepare(`
-    INSERT OR REPLACE INTO budgets (userId, category, amount, month)
-    VALUES (?, ?, ?, ?)
-  `);
-
   const currentMonth = getCurrentMonthKey();
   const previousMonth = getPreviousMonthKey();
   const monthsToSeed = [currentMonth, previousMonth];
@@ -101,7 +120,13 @@ async function seedDatabase() {
     for (const monthKey of monthsToSeed) {
         for (const category of expenseCategories) {
             const amount = getRandomAmount(50000, 150000); 
-            insertBudgetStmt.run(user.id, category, amount, monthKey);
+            // Postgres "UPSERT" syntax
+            await db.query(`
+              INSERT INTO budgets ("userId", category, amount, month)
+              VALUES ($1, $2, $3, $4)
+              ON CONFLICT ("userId", category, month) 
+              DO UPDATE SET amount = EXCLUDED.amount
+            `, [user.id, category, amount, monthKey]);
         }
     }
   }
@@ -110,59 +135,30 @@ async function seedDatabase() {
   // --- PART 3: SEED TRANSACTIONS ---
   console.log('💸 Seeding transactions...');
 
-  const insertTxStmt = db.prepare(`
-    INSERT INTO transactions (userId, transactionName, amount, type, category, notes, createdAt)
-    VALUES (?, ?, ?, ?, ?, ?, ?)
-  `);
-
   for (const user of allUsers) {
     console.log(`   -> Generating data for ${user.email}...`);
+    // We use await in loop to ensure they are inserted in order (safest for scripts)
     for (let i = 0; i < 35; i++) {
-      createRandomTransaction(user.id, 'CURRENT_MONTH');
+      await createRandomTransaction(db, user.id, 'CURRENT_MONTH');
     }
     for (let i = 0; i < 35; i++) {
-      createRandomTransaction(user.id, 'PREVIOUS_MONTH');
+      await createRandomTransaction(db, user.id, 'PREVIOUS_MONTH');
     }
   }
 
   // --- PART 4: SEED SETTINGS (NEW) ---
   console.log('⚙️  Seeding user settings...');
   
-  // We use INSERT OR IGNORE so we don't overwrite if settings already exist
-  const insertSettingsStmt = db.prepare(`
-    INSERT OR IGNORE INTO settings (userId, themePreference, currency, aiInsights, budgetAlerts)
-    VALUES (?, 'System', 'NGN', 1, 0)
-  `);
-
   for (const user of allUsers) {
-    insertSettingsStmt.run(user.id);
+    // Using TRUE/FALSE for booleans instead of 1/0
+    await db.query(`
+      INSERT INTO settings ("userId", "themePreference", currency, "aiInsights", "budgetAlerts")
+      VALUES ($1, 'System', 'NGN', TRUE, FALSE)
+      ON CONFLICT ("userId") DO NOTHING
+    `, [user.id]);
   }
+  
   console.log('✅ Default settings applied to all users!');
-
-  function createRandomTransaction(userId, period) {
-    const isIncome = Math.random() > 0.75;
-    const type = isIncome ? 'INCOME' : 'EXPENSE';
-    const category = isIncome ? getRandomItem(incomeCategories) : getRandomItem(expenseCategories);
-    
-    const amount = isIncome 
-      ? getRandomAmount(50000, 200000) 
-      : getRandomAmount(1000, 50000);
-
-    const transactionName = `${category} - ${period === 'CURRENT_MONTH' ? 'Recent' : 'Old'}`;
-    const notes = `Seeded data for ${period}`;
-    const createdAt = getStrategicDate(period);
-
-    insertTxStmt.run(
-      userId,
-      transactionName,
-      amount,
-      type,
-      category,
-      notes,
-      createdAt
-    );
-  }
-
   console.log('✅ Seeding completed successfully!');
 }
 
