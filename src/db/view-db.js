@@ -1,64 +1,76 @@
-import Database from 'better-sqlite3';
-import path from 'path';
+import { openDb, closeDb } from './database.js';
+import dotenv from 'dotenv';
 
-// 1. Connect to the database
-// Note: Changed 'database.db' to 'finprime.db' to match your project
-const dbPath = path.join(process.cwd(), 'database.db');
-const db = new Database(dbPath, { readonly: true, fileMustExist: true });
+dotenv.config();
 
-// 2. Get the specific table name from command line arguments
-const tableName = process.argv[2];
+async function viewDb() {
+  const tableName = process.argv[2];
+  const db = openDb();
 
-if (!tableName) {
-  // === MODE A: List all tables ===
-  console.log('\n📂  DATABASE TABLES FOUND:');
-  console.log('--------------------------');
-  
-  const tables = db.prepare(`
-    SELECT name FROM sqlite_master 
-    WHERE type='table' AND name != 'sqlite_sequence'
-  `).all();
-
-  if (tables.length === 0) {
-    console.log('⚠️  No tables found in the database.');
-  } else {
-    tables.forEach(t => {
-      const count = db.prepare(`SELECT count(*) as total FROM ${t.name}`).get();
-      console.log(`- ${t.name} (${count.total} rows)`);
-    });
-    console.log('\n💡  Usage: pnpx tsx src/utils/view-db.js <table_name>');
-  }
-
-} else {
-  // === MODE B: Show data for specific table ===
   try {
-    console.log(`\n🔍  Viewing Table: ${tableName}`);
-    
-    let query;
+    if (!tableName) {
+      // === MODE A: List all tables ===
+      console.log('\n📂  DATABASE TABLES FOUND:');
+      console.log('--------------------------');
 
-    // Smart Column Selection based on table name
-    if (tableName === 'users') {
-        // Exclude password for cleaner view
-        query = `SELECT id, email, firstName, lastName, avatar, googleId, createdAt FROM ${tableName}`;
-    } else if (tableName === 'transactions') {
-        // query = `SELECT id, userId, transactionName, amount, type, category, createdAt FROM ${tableName}`;
-        query = `SELECT * FROM ${tableName}`;
+      // 1. Get list of tables from Postgres System Catalog
+      const res = await db.query(`
+        SELECT table_name 
+        FROM information_schema.tables 
+        WHERE table_schema = 'public' 
+        AND table_type = 'BASE TABLE'
+      `);
+
+      const tables = res.rows;
+
+      if (tables.length === 0) {
+        console.log('⚠️  No tables found in the database.');
+      } else {
+        // 2. Loop through and get count for each
+        for (const t of tables) {
+          const countRes = await db.query(`SELECT COUNT(*) FROM ${t.table_name}`);
+          const count = countRes.rows[0].count;
+          console.log(`- ${t.table_name} (${count} rows)`);
+        }
+        console.log('\n💡  Usage: node db/viewdb.js <table_name>');
+      }
+
     } else {
+      // === MODE B: Show data for specific table ===
+      
+      // Security Check (Prevent SQL Injection via table name)
+      if (!/^[a-zA-Z0-9_]+$/.test(tableName)) {
+        throw new Error("Invalid table name. Use only letters, numbers, and underscores.");
+      }
+
+      console.log(`\n🔍  Viewing Table: ${tableName}`);
+      
+      let query;
+
+      // Smart Column Selection
+      if (tableName === 'users') {
+        // Exclude password for cleaner view
+        query = `SELECT id, email, "firstName", "lastName", avatar, "googleId", "createdAt" FROM ${tableName}`;
+      } else {
         // Fallback for other tables (select everything)
         query = `SELECT * FROM ${tableName}`;
-    }
+      }
 
-    const rows = db.prepare(query).all();
-    
-    if (rows.length === 0) {
-      console.log('⚠️  Table is empty.');
-    } else {
-      console.table(rows); 
+      const res = await db.query(query);
+      const rows = res.rows;
+      
+      if (rows.length === 0) {
+        console.log('⚠️  Table is empty.');
+      } else {
+        console.table(rows); 
+      }
     }
   } catch (err) {
-    console.error(`❌  Error: Could not read table '${tableName}'.`);
+    console.error(`❌  Error: Could not read table '${tableName || 'database'}'.`);
     console.error(`   Details: ${err.message}`);
+  } finally {
+    closeDb();
   }
 }
 
-db.close();
+viewDb();

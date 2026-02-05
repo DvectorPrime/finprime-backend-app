@@ -3,116 +3,116 @@ import dotenv from 'dotenv';
 
 dotenv.config();
 
-function initDatabase() {
-  console.log('🏗️  Initializing database...');
+async function initDatabase() {
+  console.log('🏗️  Initializing PostgreSQL database...');
 
   try {
-    const db = openDb();
+    const db = openDb(); // This now returns the Postgres Pool
 
     // 1. Users Table
-    db.exec(`
+    // changed: AUTOINCREMENT -> SERIAL, DATETIME -> TIMESTAMP, CURRENT_TIMESTAMP -> NOW()
+    await db.query(`
       CREATE TABLE IF NOT EXISTS users (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        id SERIAL PRIMARY KEY,
         email TEXT UNIQUE NOT NULL,
         password TEXT,
-        googleId TEXT,
-        firstName TEXT,
-        lastName TEXT,
+        "googleId" TEXT,
+        "firstName" TEXT,
+        "lastName" TEXT,
         avatar TEXT, 
-        createdAt DATETIME DEFAULT CURRENT_TIMESTAMP,
-        updatedAt DATETIME DEFAULT CURRENT_TIMESTAMP
+        "createdAt" TIMESTAMP DEFAULT NOW(),
+        "updatedAt" TIMESTAMP DEFAULT NOW()
       );
     `);
 
     // 2. Transactions Table
-    db.exec(`
+    await db.query(`
       CREATE TABLE IF NOT EXISTS transactions (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        userId INTEGER NOT NULL,
-        transactionName TEXT NOT NULL,
+        id SERIAL PRIMARY KEY,
+        "userId" INTEGER NOT NULL,
+        "transactionName" TEXT NOT NULL,
         amount DECIMAL(10, 2) NOT NULL,
         type TEXT CHECK(type IN ('INCOME', 'EXPENSE')) NOT NULL,
         category TEXT NOT NULL,
         notes TEXT,
-        createdAt DATETIME DEFAULT CURRENT_TIMESTAMP,
-        FOREIGN KEY(userId) REFERENCES users(id) ON DELETE CASCADE
+        "createdAt" TIMESTAMP DEFAULT NOW(),
+        FOREIGN KEY("userId") REFERENCES users(id) ON DELETE CASCADE
       );
     `);
 
     // 3. Budgets Table
-    db.exec(`
+    await db.query(`
       CREATE TABLE IF NOT EXISTS budgets (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        userId INTEGER NOT NULL,
+        id SERIAL PRIMARY KEY,
+        "userId" INTEGER NOT NULL,
         category TEXT NOT NULL,
         amount DECIMAL(10, 2) NOT NULL,
         month TEXT NOT NULL, 
-        createdAt DATETIME DEFAULT CURRENT_TIMESTAMP,
-        updatedAt DATETIME DEFAULT CURRENT_TIMESTAMP,
-        FOREIGN KEY(userId) REFERENCES users(id) ON DELETE CASCADE,
-        UNIQUE(userId, category, month)
+        "createdAt" TIMESTAMP DEFAULT NOW(),
+        "updatedAt" TIMESTAMP DEFAULT NOW(),
+        FOREIGN KEY("userId") REFERENCES users(id) ON DELETE CASCADE,
+        UNIQUE("userId", category, month)
       );
     `);
 
     // 4. Settings Table
-    db.exec(`
+    // changed: INTEGER (0/1) -> BOOLEAN (FALSE/TRUE)
+    await db.query(`
       CREATE TABLE IF NOT EXISTS settings (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        userId INTEGER UNIQUE NOT NULL,
-        themePreference TEXT CHECK(themePreference IN ('Light', 'Dark', 'System')) DEFAULT 'System',
+        id SERIAL PRIMARY KEY,
+        "userId" INTEGER UNIQUE NOT NULL,
+        "themePreference" TEXT CHECK("themePreference" IN ('Light', 'Dark', 'System')) DEFAULT 'System',
         currency TEXT DEFAULT 'NGN',
-        aiInsights INTEGER DEFAULT 1,
-        budgetAlerts INTEGER DEFAULT 0,
-        createdAt DATETIME DEFAULT CURRENT_TIMESTAMP,
-        updatedAt DATETIME DEFAULT CURRENT_TIMESTAMP,
-        FOREIGN KEY(userId) REFERENCES users(id) ON DELETE CASCADE
+        "aiInsights" BOOLEAN DEFAULT TRUE,
+        "budgetAlerts" BOOLEAN DEFAULT FALSE,
+        "createdAt" TIMESTAMP DEFAULT NOW(),
+        "updatedAt" TIMESTAMP DEFAULT NOW(),
+        FOREIGN KEY("userId") REFERENCES users(id) ON DELETE CASCADE
       );
     `);
 
     // 5. Deleted Accounts Table
-    db.exec(`
+    await db.query(`
       CREATE TABLE IF NOT EXISTS deleted_users (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        id SERIAL PRIMARY KEY,
         email TEXT,
-        originalUserId INTEGER,
-        userCreatedAt DATETIME,
-        deletedAt DATETIME DEFAULT CURRENT_TIMESTAMP
+        "originalUserId" INTEGER,
+        "userCreatedAt" TIMESTAMP,
+        "deletedAt" TIMESTAMP DEFAULT NOW()
       );
     `);
 
     // 6. Verification Codes Table
-    db.exec(`
+    await db.query(`
       CREATE TABLE IF NOT EXISTS verification_codes (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        id SERIAL PRIMARY KEY,
         email TEXT NOT NULL,
         code TEXT NOT NULL,
         type TEXT CHECK(type IN ('REGISTRATION', 'PASSWORD_RESET')) NOT NULL,
-        expiresAt DATETIME NOT NULL,
-        createdAt DATETIME DEFAULT CURRENT_TIMESTAMP
+        "expiresAt" TIMESTAMP NOT NULL,
+        "createdAt" TIMESTAMP DEFAULT NOW()
       );
     `);
 
-    // 7. AI Insights Table (NEW)
-    // - type: Distinguishes between Dashboard tips and Budget analysis
-    // - content: The actual text response from Gemini
-    // - expiresAt: Calculated when we insert the row (Now + 2 days or Now + 3 days)
-    db.exec(`
+    // 7. AI Insights Table
+    await db.query(`
       CREATE TABLE IF NOT EXISTS ai_insights (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        userId INTEGER NOT NULL,
+        id SERIAL PRIMARY KEY,
+        "userId" INTEGER NOT NULL,
         type TEXT CHECK(type IN ('DASHBOARD', 'BUDGET')) NOT NULL,
         content TEXT NOT NULL,
-        expiresAt DATETIME NOT NULL,
-        createdAt DATETIME DEFAULT CURRENT_TIMESTAMP,
-        FOREIGN KEY(userId) REFERENCES users(id) ON DELETE CASCADE
+        "expiresAt" TIMESTAMP NOT NULL,
+        "createdAt" TIMESTAMP DEFAULT NOW(),
+        FOREIGN KEY("userId") REFERENCES users(id) ON DELETE CASCADE
       );
     `);
 
-    console.log('✅ Database initialized successfully!');
+    console.log('✅ PostgreSQL database initialized successfully!');
   } catch (err) {
     console.error('❌ Error initializing database:', err);
     process.exit(1);
   } finally {
+    // We await the close function to ensure connections are cut cleanly
     closeDb();
   }
 }

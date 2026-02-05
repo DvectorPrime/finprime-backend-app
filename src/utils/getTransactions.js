@@ -1,95 +1,129 @@
 import { openDb } from "../db/database.js";
 
-export function getTransactions(userId, filters) {
+export async function getTransactions(userId, filters) {
     const db = openDb();
     const PAGE_SIZE = 15;
     const safePage = Math.max(1, parseInt(filters.page) || 1);
 
+    // --- SCENARIO 1: RECENT ONLY (Dashboard) ---
     if (filters.recentOnly) {
-        const stmt = db.prepare(`
-            SELECT id, transactionName, amount, type, category, notes, createdAt, notes 
+        // Change ? to $1
+        const res = await db.query(`
+            SELECT id, "transactionName", amount, type, category, notes, "createdAt" 
             FROM transactions 
-            WHERE userId = ? 
-            ORDER BY createdAt DESC 
+            WHERE "userId" = $1 
+            ORDER BY "createdAt" DESC 
             LIMIT 5
-        `);
+        `, [userId]);
+
         return {
-            data: stmt.all(userId),
+            data: res.rows,
             meta: { mode: 'recent' }
         };
     }
 
-    const conditions = ["userId = ?"];
+    // --- SCENARIO 2: FILTERED LIST ---
+    
+    // Start with the base condition (User ID is always $1)
+    const conditions = [`"userId" = $1`];
     const params = [userId];
+
+    // Helper to get the next placeholder number (e.g., $2, $3...)
+    const nextParam = () => `$${params.length + 1}`;
 
     // A. Type Filter
     if (filters.type && filters.type !== 'all' && filters.type !== 'All Types') {
-        conditions.push("type = ?");
+        conditions.push(`type = ${nextParam()}`);
         params.push(filters.type.toUpperCase());
     }
 
     // B. Category Filter
     if (filters.category && filters.category !== 'all' && filters.category !== 'All Categories') {
-        conditions.push("category = ?");
+        conditions.push(`category = ${nextParam()}`);
         params.push(filters.category);
     }
 
     // C. Search Filter
     if (filters.search) {
-        conditions.push("(transactionName LIKE ? OR notes LIKE ?)");
-        const searchTerm = `%${filters.search}%`; 
-        params.push(searchTerm, searchTerm);
+        // We need two placeholders for the same search term
+        const p1 = nextParam(); // e.g. $3
+        // We push the term first so params.length increases for the next call
+        params.push(`%${filters.search}%`); 
+        
+        const p2 = nextParam(); // e.g. $4
+        params.push(`%${filters.search}%`);
+
+        conditions.push(`("transactionName" ILIKE ${p1} OR notes ILIKE ${p2})`);
+        // Note: ILIKE is Postgres specific. It means "Case Insensitive Like" (matches "food" and "Food")
     }
 
     // D. Date Filter (Month & Year)
     if (filters.month && filters.year) {
         const year = parseInt(filters.year);
-        const month = parseInt(filters.month); // 0 = Jan, 11 = Dec
+        const month = parseInt(filters.month); // 0 = Jan
 
         const startDate = new Date(year, month, 1).toISOString();
         const nextMonthStart = new Date(year, month + 1, 1).toISOString();
 
-        conditions.push("createdAt >= ? AND createdAt < ?");
-        params.push(startDate, nextMonthStart);
+        const pStart = nextParam();
+        params.push(startDate);
+        
+        const pEnd = nextParam();
+        params.push(nextMonthStart);
+
+        conditions.push(`"createdAt" >= ${pStart} AND "createdAt" < ${pEnd}`);
     }
 
     // Combine conditions
     const whereClause = " WHERE " + conditions.join(" AND ");
 
-    const countStmt = db.prepare(`SELECT COUNT(*) as total FROM transactions ${whereClause}`);
-    const totalResult = countStmt.get(...params);
-    const totalTransactions = totalResult.total;
+    // 1. GET TOTAL COUNT
+    const countQuery = `SELECT COUNT(*) as total FROM transactions ${whereClause}`;
+    const countRes = await db.query(countQuery, params);
+    const totalTransactions = parseInt(countRes.rows[0].total); // Postgres returns count as string
     const totalPages = Math.ceil(totalTransactions / PAGE_SIZE);
 
-    const summaryStmt = db.prepare(`
+    // 2. GET SUMMARY (Income vs Expense)
+    const summaryQuery = `
         SELECT 
-            SUM(CASE WHEN type = 'INCOME' THEN amount ELSE 0 END) as totalIncome,
-            SUM(CASE WHEN type = 'EXPENSE' THEN amount ELSE 0 END) as totalExpense
+            SUM(CASE WHEN type = 'INCOME' THEN amount ELSE 0 END) as "totalIncome",
+            SUM(CASE WHEN type = 'EXPENSE' THEN amount ELSE 0 END) as "totalExpense"
         FROM transactions 
         ${whereClause}
-    `);
-    
-    const summaryResult = summaryStmt.get(...params);
+    `;
+    const summaryRes = await db.query(summaryQuery, params);
+    const summaryRow = summaryRes.rows[0];
 
+    // Parse Postgres results (SUM returns string or null)
+    const totalIncome = parseFloat(summaryRow.totalIncome) || 0;
+    const totalExpense = parseFloat(summaryRow.totalExpense) || 0;
+
+    // 3. GET DATA (With Pagination)
     const offset = (safePage - 1) * PAGE_SIZE;
-    const finalParams = [...params, PAGE_SIZE, offset]; 
+    
+    // Add LIMIT and OFFSET to params
+    const limitParam = nextParam();
+    params.push(PAGE_SIZE);
+    
+    const offsetParam = nextParam();
+    params.push(offset);
 
-    const dataStmt = db.prepare(`
-        SELECT id, transactionName, amount, type, category, createdAt, notes 
+    const dataQuery = `
+        SELECT id, "transactionName", amount, type, category, "createdAt", notes 
         FROM transactions 
         ${whereClause} 
-        ORDER BY createdAt DESC 
-        LIMIT ? OFFSET ?
-    `);
+        ORDER BY "createdAt" DESC 
+        LIMIT ${limitParam} OFFSET ${offsetParam}
+    `;
 
-    const transactions = dataStmt.all(...finalParams);
+    const dataRes = await db.query(dataQuery, params);
 
     return {
-        data: transactions,
+        data: dataRes.rows,
         summary: {
-            totalIncome: summaryResult.totalIncome || 0,
-            totalExpense: summaryResult.totalExpense || 0,
-            net: (summaryResult.totalIncome || 0) - (summaryResult.totalExpense || 0)
+            totalIncome,
+            totalExpense,
+            net: totalIncome - totalExpense
         },
         meta: {
             page: safePage,

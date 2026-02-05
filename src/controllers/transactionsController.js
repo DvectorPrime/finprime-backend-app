@@ -1,8 +1,7 @@
 import { openDb } from "../db/database.js";
+import { getTransactions } from "../utils/getTransactions.js";
 
-import {getTransactions} from "../utils/getTransactions.js"
-
-export  function getDashboardStats(req, res) {
+export async function getDashboardStats(req, res) {
     const userId = req.session?.userId; 
 
     if (!userId) {
@@ -11,106 +10,123 @@ export  function getDashboardStats(req, res) {
 
     const db = openDb();
 
-    const now = new Date();
-    
-    const startOfCurrentMonth = new Date(now.getFullYear(), now.getMonth(), 1).toISOString();
-    
-    const startOfPrevMonth = new Date(now.getFullYear(), now.getMonth() - 1, 1).toISOString();
-    
-    const endOfPrevMonth = startOfCurrentMonth; 
-    
-    const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate()).toISOString();
+    try {
+        const now = new Date();
+        
+        const startOfCurrentMonth = new Date(now.getFullYear(), now.getMonth(), 1).toISOString();
+        const startOfPrevMonth = new Date(now.getFullYear(), now.getMonth() - 1, 1).toISOString();
+        const endOfPrevMonth = startOfCurrentMonth; 
+        const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate()).toISOString();
 
-    const currentStats = db.prepare(`
-        SELECT 
-            SUM(CASE WHEN type = 'INCOME' THEN amount ELSE 0 END) as income,
-            SUM(CASE WHEN type = 'EXPENSE' THEN amount ELSE 0 END) as expense
-        FROM transactions 
-        WHERE userId = ? AND createdAt >= ?
-    `).get(userId, startOfCurrentMonth);
+        // 1. Current Month Stats
+        const currentStatsRes = await db.query(`
+            SELECT 
+                SUM(CASE WHEN type = 'INCOME' THEN amount ELSE 0 END) as income,
+                SUM(CASE WHEN type = 'EXPENSE' THEN amount ELSE 0 END) as expense
+            FROM transactions 
+            WHERE "userId" = $1 AND "createdAt" >= $2
+        `, [userId, startOfCurrentMonth]);
+        
+        const currentStats = {
+            income: parseFloat(currentStatsRes.rows[0].income) || 0,
+            expense: parseFloat(currentStatsRes.rows[0].expense) || 0
+        };
 
-    const prevMonthStats = db.prepare(`
-        SELECT 
-            SUM(CASE WHEN type = 'INCOME' THEN amount ELSE 0 END) as income,
-            SUM(CASE WHEN type = 'EXPENSE' THEN amount ELSE 0 END) as expense
-        FROM transactions 
-        WHERE userId = ? AND createdAt >= ? AND createdAt < ?
-    `).get(userId, startOfPrevMonth, endOfPrevMonth);
+        // 2. Previous Month Stats
+        const prevMonthStatsRes = await db.query(`
+            SELECT 
+                SUM(CASE WHEN type = 'INCOME' THEN amount ELSE 0 END) as income,
+                SUM(CASE WHEN type = 'EXPENSE' THEN amount ELSE 0 END) as expense
+            FROM transactions 
+            WHERE "userId" = $1 AND "createdAt" >= $2 AND "createdAt" < $3
+        `, [userId, startOfPrevMonth, endOfPrevMonth]);
 
-    const balanceStats = db.prepare(`
-        SELECT 
-            (SUM(CASE WHEN type = 'INCOME' THEN amount ELSE 0 END) - 
-             SUM(CASE WHEN type = 'EXPENSE' THEN amount ELSE 0 END)) as total
-        FROM transactions WHERE userId = ?
-    `).get(userId);
+        const prevMonthStats = {
+            income: parseFloat(prevMonthStatsRes.rows[0].income) || 0,
+            expense: parseFloat(prevMonthStatsRes.rows[0].expense) || 0
+        };
 
-    const prevBalanceStats = db.prepare(`
-        SELECT 
-            (SUM(CASE WHEN type = 'INCOME' THEN amount ELSE 0 END) - 
-             SUM(CASE WHEN type = 'EXPENSE' THEN amount ELSE 0 END)) as total
-        FROM transactions WHERE userId = ? AND createdAt < ?
-    `).get(userId, startOfToday);
+        // 3. Total Balance
+        const balanceStatsRes = await db.query(`
+            SELECT 
+                (SUM(CASE WHEN type = 'INCOME' THEN amount ELSE 0 END) - 
+                 SUM(CASE WHEN type = 'EXPENSE' THEN amount ELSE 0 END)) as total
+            FROM transactions WHERE "userId" = $1
+        `, [userId]);
+        
+        const balanceTotal = parseFloat(balanceStatsRes.rows[0].total) || 0;
 
-    const getPercentage = (curr, prev) => {
-        if (!prev || prev === 0) {
-            return curr > 0 ? 100 : 0; 
+        // 4. Previous Balance (Before Today)
+        const prevBalanceStatsRes = await db.query(`
+            SELECT 
+                (SUM(CASE WHEN type = 'INCOME' THEN amount ELSE 0 END) - 
+                 SUM(CASE WHEN type = 'EXPENSE' THEN amount ELSE 0 END)) as total
+            FROM transactions WHERE "userId" = $1 AND "createdAt" < $2
+        `, [userId, startOfToday]);
+
+        const prevBalanceTotal = parseFloat(prevBalanceStatsRes.rows[0].total) || 0;
+
+        const getPercentage = (curr, prev) => {
+            if (!prev || prev === 0) {
+                return curr > 0 ? 100 : 0; 
+            }
+            return ((curr - prev) / prev) * 100;
+        };
+
+        const responseData = {
+            balance: {
+                value: balanceTotal,
+                percentage: getPercentage(balanceTotal, prevBalanceTotal)
+            },
+            income: {
+                value: currentStats.income,
+                percentage: getPercentage(currentStats.income, prevMonthStats.income)
+            },
+            expenses: {
+                value: currentStats.expense,
+                percentage: getPercentage(currentStats.expense, prevMonthStats.expense)
+            },
+            savingsRate: {
+                value: currentStats.income 
+                    ? ((currentStats.income - currentStats.expense) / currentStats.income) * 100 
+                    : 0
+            }
+        };
+
+        if (res) {
+            return res.json(responseData);
         }
-        return ((curr - prev) / prev) * 100;
-    };
-
-    const responseData = {
-        balance: {
-            value: balanceStats.total || 0,
-            percentage: getPercentage(balanceStats.total, prevBalanceStats.total) // Keeps daily compare
-        },
-        income: {
-            value: currentStats.income || 0,
-            percentage: getPercentage(currentStats.income, prevMonthStats.income) // NOW compares vs Last Month
-        },
-        expenses: {
-            value: currentStats.expense || 0,
-            percentage: getPercentage(currentStats.expense, prevMonthStats.expense) // NOW compares vs Last Month
-        },
-        savingsRate: {
-            // (Income - Expense) / Income
-            value: currentStats.income 
-                ? ((currentStats.income - currentStats.expense) / currentStats.income) * 100 
-                : 0
-        }
-    };
-
-    if (res) {
-        return res.json(responseData);
-    } 
+    } catch (err) {
+        console.error("Dashboard Stats Error:", err);
+        return res.status(500).json({ error: "Failed to fetch dashboard stats" });
+    }
 }
 
 export async function getAllTransactions(req, res) {
     const userId = req.session.userId;
     const query = req.query;
 
-    // Extract all potential filters
     const filters = {
         page: query.page || 1,
         recentOnly: query.recentOnly === 'true',
-        
-        // New Filters
-        month: query.month,       // e.g., "0" for Jan, "11" for Dec
-        year: query.year,         // e.g., "2026"
-        type: query.type,         // "INCOME", "EXPENSE", or "all"
-        category: query.category, // e.g., "Food", "Salary" or "all"
-        search: query.search      // e.g., "Netflix"
+        month: query.month,      
+        year: query.year,        
+        type: query.type,        
+        category: query.category, 
+        search: query.search      
     };
 
     try {
-        const result = getTransactions(userId, filters);
+        // Updated to use await because getTransactions is now async
+        const result = await getTransactions(userId, filters);
         res.json(result);
     } catch (err) {
         console.error("Get Transactions Error:", err);
-        return res.status(500).json({ error: "An Error Occured fetching transactions" });
+        return res.status(500).json({ error: "An Error Occurred fetching transactions" });
     }
 }
 
-export function createTransaction(req, res) {
+export async function createTransaction(req, res) {
     const userId = req.session?.userId; 
 
     if (!userId) {
@@ -134,24 +150,16 @@ export function createTransaction(req, res) {
         const finalType = type.toUpperCase(); 
         const finalAmount = parseFloat(amount);
 
-        const stmt = db.prepare(`
-            INSERT INTO transactions (userId, transactionName, amount, type, category, notes, createdAt)
-            VALUES (?, ?, ?, ?, ?, ?, ?)
-        `);
-
-        const info = stmt.run(
-            userId,
-            transactionName,
-            finalAmount,
-            finalType,
-            category,
-            notes || "", 
-            finalDate
-        );
+        // Added RETURNING id to get the new row's ID immediately
+        const result = await db.query(`
+            INSERT INTO transactions ("userId", "transactionName", amount, type, category, notes, "createdAt")
+            VALUES ($1, $2, $3, $4, $5, $6, $7)
+            RETURNING id
+        `, [userId, transactionName, finalAmount, finalType, category, notes || "", finalDate]);
 
         return res.status(201).json({ 
             message: "Transaction added successfully", 
-            transactionId: info.lastInsertRowid 
+            transactionId: result.rows[0].id 
         });
 
     } catch (err) {
@@ -160,7 +168,7 @@ export function createTransaction(req, res) {
     }
 }
 
-export const getMonthlyStats = (req, res) => {
+export async function getMonthlyStats(req, res) {
     const userId = req.session.userId;
 
     if (!userId) {
@@ -174,28 +182,33 @@ export const getMonthlyStats = (req, res) => {
         const startMetricsDate = new Date(today.getFullYear(), today.getMonth() - 5, 1);
         const startDateString = startMetricsDate.toISOString();
 
+        // Changed strftime (SQLite) to TO_CHAR (Postgres)
         const query = `
             SELECT 
-                strftime('%Y-%m', createdAt) as monthKey,
+                TO_CHAR("createdAt", 'YYYY-MM') as "monthKey",
                 type,
                 SUM(amount) as total
             FROM transactions
-            WHERE userId = ? AND createdAt >= ?
-            GROUP BY monthKey, type
-            ORDER BY monthKey ASC
+            WHERE "userId" = $1 AND "createdAt" >= $2
+            GROUP BY "monthKey", type
+            ORDER BY "monthKey" ASC
         `;
 
-        const rows = db.prepare(query).all(userId, startDateString);
+        const result = await db.query(query, [userId, startDateString]);
+        const rows = result.rows;
 
         const dataMap = {};
         rows.forEach(row => {
             if (!dataMap[row.monthKey]) {
                 dataMap[row.monthKey] = { income: 0, expense: 0 };
             }
+            // Parse float here because total is a string in Postgres
+            const val = parseFloat(row.total);
+            
             if (row.type === 'INCOME') {
-                dataMap[row.monthKey].income = row.total;
+                dataMap[row.monthKey].income = val;
             } else {
-                dataMap[row.monthKey].expense = row.total;
+                dataMap[row.monthKey].expense = val;
             }
         });
 
@@ -224,4 +237,4 @@ export const getMonthlyStats = (req, res) => {
         console.error("Monthly Stats Error:", error);
         res.status(500).json({ error: "Failed to fetch chart data" });
     }
-};
+}

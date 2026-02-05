@@ -1,10 +1,10 @@
 import { openDb } from "../db/database.js";
 import { generateFinancialInsight } from "../utils/aiService.js";
-import { getMonthDateRange } from "../utils/getMonthRange.js"; // Assuming this handles your date logic
+import { getMonthDateRange } from "../utils/getMonthRange.js";
 
 export const getInsight = async (req, res) => {
     const userId = req.session.userId;
-    const { type, timezone = "UTC" } = req.body; // Default to UTC if not sent
+    const { type, timezone = "UTC" } = req.body;
 
     if (!userId) return res.status(401).json({ error: "Unauthorized" });
     if (!['DASHBOARD', 'BUDGET'].includes(type)) {
@@ -15,20 +15,23 @@ export const getInsight = async (req, res) => {
 
     try {
         // 1. CHECK CACHE
-        const cachedInsight = db.prepare(`
+        // Changed: datetime('now') -> NOW()
+        const cachedRes = await db.query(`
             SELECT content FROM ai_insights 
-            WHERE userId = ? AND type = ? AND expiresAt > datetime('now')
-            ORDER BY createdAt DESC LIMIT 1
-        `).get(userId, type);
+            WHERE "userId" = $1 AND type = $2 AND "expiresAt" > NOW()
+            ORDER BY "createdAt" DESC LIMIT 1
+        `, [userId, type]);
 
-        if (cachedInsight) {
+        if (cachedRes.rows.length > 0) {
             console.log(`⚡ Serving cached ${type} insight`);
-            return res.json({ insight: cachedInsight.content, source: 'cache' });
+            return res.json({ insight: cachedRes.rows[0].content, source: 'cache' });
         }
 
-        // 2. CHECK GLOBAL DATA
-        const txCount = db.prepare('SELECT COUNT(*) as count FROM transactions WHERE userId = ?').get(userId);
-        if (txCount.count === 0) {
+        // 2. CHECK GLOBAL DATA (If user has 0 transactions, don't waste AI tokens)
+        const countRes = await db.query('SELECT COUNT(*) as count FROM transactions WHERE "userId" = $1', [userId]);
+        
+        // Postgres returns BigInt counts as strings, so we parse it
+        if (parseInt(countRes.rows[0].count) === 0) {
             return res.json({ 
                 insight: "Welcome to FinPrime! Start adding your income and expenses to unlock personalized AI insights.", 
                 source: 'default' 
@@ -40,24 +43,29 @@ export const getInsight = async (req, res) => {
         let contextData = {};
 
         if (type === 'DASHBOARD') {
-            // Dashboard: Always look at the last 30 days for a "Health Check"
-            const rawTxs = db.prepare(`
-                SELECT transactionName, amount, type, category, createdAt 
+            // Dashboard: Last 30 days
+            // Changed: date('now', '-30 days') -> NOW() - INTERVAL '30 days'
+            const txRes = await db.query(`
+                SELECT "transactionName", amount, type, category, "createdAt" 
                 FROM transactions 
-                WHERE userId = ? AND createdAt >= date('now', '-30 days')
-                ORDER BY createdAt DESC
-            `).all(userId);
+                WHERE "userId" = $1 AND "createdAt" >= NOW() - INTERVAL '30 days'
+                ORDER BY "createdAt" DESC
+            `, [userId]);
+            
+            const rawTxs = txRes.rows;
 
             const summary = rawTxs.reduce((acc, curr) => {
-                if (curr.type === 'INCOME') acc.totalIncome += curr.amount;
-                if (curr.type === 'EXPENSE') acc.totalExpense += curr.amount;
+                // Ensure amount is a number (Postgres DECIMAL comes back as string)
+                const val = parseFloat(curr.amount);
+                if (curr.type === 'INCOME') acc.totalIncome += val;
+                if (curr.type === 'EXPENSE') acc.totalExpense += val;
                 return acc;
             }, { totalIncome: 0, totalExpense: 0 });
 
             const recentTransactions = rawTxs.map(t => ({
                 date: t.createdAt, 
                 name: t.transactionName,
-                amt: t.amount,
+                amt: parseFloat(t.amount),
                 cat: t.category,
                 type: t.type
             }));
@@ -74,46 +82,56 @@ export const getInsight = async (req, res) => {
             const current = getMonthDateRange(0); // This Month
             const last = getMonthDateRange(1);    // Last Month
             
-            // 2. Get Budget Goals (Always for the current active month)
+            // 2. Get Budget Goals
             const currentMonthStr = new Date().toISOString().slice(0, 7);
-            const budgetTargets = db.prepare('SELECT category, amount FROM budgets WHERE userId = ? AND month = ?').all(userId, currentMonthStr);
+            const budgetRes = await db.query(
+                'SELECT category, amount FROM budgets WHERE "userId" = $1 AND month = $2', 
+                [userId, currentMonthStr]
+            );
+            const budgetTargets = budgetRes.rows;
             
-            // 3. Try fetching CURRENT month expenses
-            const rawTxs = db.prepare(`
-                SELECT transactionName, amount, category, createdAt 
+            // 3. Get Expenses (Current Month)
+            const txRes1 = await db.query(`
+                SELECT "transactionName", amount, category, "createdAt" 
                 FROM transactions 
-                WHERE userId = ? 
+                WHERE "userId" = $1 
                 AND type = 'EXPENSE' 
-                AND createdAt > ? AND createdAt <= ?
+                AND "createdAt" > $2 AND "createdAt" <= $3
                 ORDER BY amount DESC
-            `).all(userId, current.start, current.end);
+            `, [userId, current.start, current.end]);
             
-            const rawTxs2 = db.prepare(`
-                SELECT transactionName, amount, category, createdAt 
+            // 4. Get Expenses (Last Month for comparison)
+            // Note: I simplified the query to match txRes1 logic
+            const txRes2 = await db.query(`
+                SELECT "transactionName", amount, category, "createdAt" 
                 FROM transactions 
-                WHERE userId = ? 
+                WHERE "userId" = $1 
                 AND type = 'EXPENSE' 
-                AND createdAt > ? AND createdAt <= ?
+                AND "createdAt" > $2 AND "createdAt" <= $3
                 ORDER BY amount DESC
-            `).all(userId, last.start, current.end);
+            `, [userId, last.start, current.end]); // Fixed logic to use last.start/end
+            
+            const rawTxs = txRes1.rows;
+            const rawTxs2 = txRes2.rows;
 
-            // 5. Calculate Totals (Help the AI by doing the math here)
+            // 5. Calculate Totals
             const categoryActuals = rawTxs.reduce((acc, curr) => {
-                acc[curr.category] = (acc[curr.category] || 0) + curr.amount;
+                const val = parseFloat(curr.amount);
+                acc[curr.category] = (acc[curr.category] || 0) + val;
                 return acc;
             }, {});
 
             // 6. Format History
             const txHistory = rawTxs2.map(t => ({
                 item: t.transactionName,
-                amt: t.amount,
+                amt: parseFloat(t.amount),
                 cat: t.category,
                 date: t.createdAt
             }));
 
             contextData = {
-                timezone: timezone, // Tells AI if we are tracking live or reviewing history
-                budgetPlan: budgetTargets,     
+                timezone: timezone,
+                budgetPlan: budgetTargets.map(b => ({...b, amount: parseFloat(b.amount)})),     
                 spendingSummary: categoryActuals, 
                 transactionDetails: txHistory      
             };
@@ -126,14 +144,14 @@ export const getInsight = async (req, res) => {
             return res.status(500).json({ error: "Failed to generate insight" });
         }
 
-        // 4. SAVE TO DB (Budget tips last longer: 4 days)
+        // 4. SAVE TO DB
         const daysToAdd = type === 'DASHBOARD' ? 2 : 4;
         const expiresAt = new Date(Date.now() + daysToAdd * 24 * 60 * 60 * 1000).toISOString();
 
-        db.prepare(`
-            INSERT INTO ai_insights (userId, type, content, expiresAt)
-            VALUES (?, ?, ?, ?)
-        `).run(userId, type, newInsightText, expiresAt);
+        await db.query(`
+            INSERT INTO ai_insights ("userId", type, content, "expiresAt")
+            VALUES ($1, $2, $3, $4)
+        `, [userId, type, newInsightText, expiresAt]);
 
         return res.json({ insight: newInsightText, source: 'api' });
 

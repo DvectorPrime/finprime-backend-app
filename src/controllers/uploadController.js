@@ -25,13 +25,13 @@ export const uploadAvatar = async (req, res) => {
       return new Promise((resolve, reject) => {
         const stream = cloudinary.uploader.upload_stream(
           {
-            folder: "finprime", // Your specific folder
+            folder: "finprime",
             resource_type: "image",
             display_name: `${userId} avatar`,
             public_id: `${userId}_avatar`,
             invalidate: true,
             overwrite: true,
-            transformation: [{ width: 400, height: 400, crop: "fill" }], // Optimization
+            transformation: [{ width: 400, height: 400, crop: "fill" }],
           },
           (error, result) => {
             if (result) {
@@ -41,20 +41,23 @@ export const uploadAvatar = async (req, res) => {
             }
           },
         );
-        // Pipe the file buffer into the upload stream
         stream.end(fileBuffer);
       });
     };
 
     // 3. Execute Upload
     const result = await streamUpload(req.file.buffer);
-    console.log(result);
     const avatarUrl = result.secure_url;
 
-    // 4. Update Database
+    // 4. Update Database (PostgreSQL)
     const db = openDb();
-    const updateStmt = db.prepare("UPDATE users SET avatar = ? WHERE id = ?");
-    updateStmt.run(avatarUrl, userId);
+    
+    // Changed: prepare/run -> await db.query
+    // Changed: ? -> $1, $2
+    await db.query(
+      "UPDATE users SET avatar = $1 WHERE id = $2",
+      [avatarUrl, userId]
+    );
 
     console.log(`Avatar updated for user ${userId}: ${avatarUrl}`);
 

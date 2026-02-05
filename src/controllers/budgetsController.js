@@ -1,83 +1,93 @@
 import { openDb } from "../db/database.js";
-import { getMonthDateRange } from "../utils/getMonthRange.js"
+import { getMonthDateRange } from "../utils/getMonthRange.js";
 
-export const getBudgetOverview = (req, res) => {
+export const getBudgetOverview = async (req, res) => {
     const userId = req.session.userId;
 
     if (!userId) {
         return res.status(401).json({ error: "Unauthorized. Please log in." });
     }
 
-    try {
-        const db = openDb();
+    const db = openDb();
 
+    try {
         const current = getMonthDateRange(0); // Offset 0 = This Month
-        const budgets = db.prepare(`
+        
+        // 1. Get Budgets
+        const budgetsRes = await db.query(`
             SELECT category, amount 
             FROM budgets 
-            WHERE userId = ? AND month = ?
-        `).all(userId, current.monthKey);
+            WHERE "userId" = $1 AND month = $2
+        `, [userId, current.monthKey]);
+        const budgets = budgetsRes.rows;
 
-        const expenses = db.prepare(`
+        // 2. Get Expenses (Grouped)
+        const expensesRes = await db.query(`
             SELECT category, SUM(amount) as total
             FROM transactions 
-            WHERE userId = ? 
+            WHERE "userId" = $1 
             AND type = 'EXPENSE'
-            AND createdAt > ? 
-            AND createdAt <= ?
+            AND "createdAt" > $2 
+            AND "createdAt" <= $3
             GROUP BY category
-        `).all(userId, current.start, current.end);
+        `, [userId, current.start, current.end]);
 
-        const expenseMap = new Map(expenses.map(e => [e.category, e.total]));
+        // Map the results (Parse float because Postgres returns SUM as string)
+        const expenseMap = new Map(expensesRes.rows.map(e => [e.category, parseFloat(e.total)]));
 
         let totalBudget = 0;
         
         const categoryData = budgets.map((b) => {
+            const budgetAmount = parseFloat(b.amount); // Ensure number
             const spent = expenseMap.get(b.category) || 0;
-            totalBudget += b.amount;
+            totalBudget += budgetAmount;
 
             expenseMap.delete(b.category);
 
             return {
                 category: b.category,
-                budgeted: b.amount,
+                budgeted: budgetAmount,
                 spent: spent,
-                remaining: Math.max(0, b.amount - spent), 
-                isOverBudget: spent > b.amount,
-                percentage: Math.min(100, (spent / b.amount) * 100)
+                remaining: Math.max(0, budgetAmount - spent), 
+                isOverBudget: spent > budgetAmount,
+                percentage: Math.min(100, (spent / budgetAmount) * 100)
             };
         });
 
-        const totalSpentResult = db.prepare(`
+        // 3. Get Total Spent
+        const totalSpentRes = await db.query(`
             SELECT SUM(amount) as total 
             FROM transactions 
-            WHERE userId = ? AND type = 'EXPENSE' AND createdAt > ? AND createdAt <= ?
-        `).get(userId, current.start, current.end);
+            WHERE "userId" = $1 AND type = 'EXPENSE' AND "createdAt" > $2 AND "createdAt" <= $3
+        `, [userId, current.start, current.end]);
         
-        const totalSpent = totalSpentResult.total || 0;
+        const totalSpent = parseFloat(totalSpentRes.rows[0].total) || 0;
         const remainingBudget = totalBudget - totalSpent;
 
+        // 4. Build Chart Data (History)
         const chartData = [];
 
+        // Loop through last 6 months
+        // We use a regular for-loop with await to keep it simple and sequential
         for (let i = 5; i >= 0; i--) {
             const range = getMonthDateRange(i);
 
-            const budgetResult = db.prepare(`
+            const budgetRes = await db.query(`
                 SELECT SUM(amount) as total 
                 FROM budgets 
-                WHERE userId = ? AND month = ?
-            `).get(userId, range.monthKey);
+                WHERE "userId" = $1 AND month = $2
+            `, [userId, range.monthKey]);
 
-            const expenseResult = db.prepare(`
+            const expenseRes = await db.query(`
                 SELECT SUM(amount) as total 
                 FROM transactions 
-                WHERE userId = ? AND type = 'EXPENSE' AND createdAt > ? AND createdAt <= ?
-            `).get(userId, range.start, range.end);
+                WHERE "userId" = $1 AND type = 'EXPENSE' AND "createdAt" > $2 AND "createdAt" <= $3
+            `, [userId, range.start, range.end]);
 
             chartData.push({
                 label: range.label, 
-                budget: budgetResult?.total || 0,
-                expense: expenseResult?.total || 0
+                budget: parseFloat(budgetRes.rows[0].total) || 0,
+                expense: parseFloat(expenseRes.rows[0].total) || 0
             });
         }
 
@@ -104,7 +114,7 @@ function getCurrentMonthKey() {
   return `${year}-${month}`;
 }
 
-export const updateBudget = (req, res) => {
+export const updateBudget = async (req, res) => {
     const userId = req.session.userId;
     if (!userId) {
         return res.status(401).json({ error: "Unauthorized" });
@@ -118,31 +128,32 @@ export const updateBudget = (req, res) => {
 
     const db = openDb();
     const currentMonth = getCurrentMonthKey();
+    
+    // ⚠️ TRANSACTION HANDLING FOR POSTGRES
+    // We need a specific client from the pool to run a transaction
+    const client = await db.connect();
 
     try {
-        const stmt = db.prepare(`
-            INSERT INTO budgets (userId, category, amount, month, updatedAt)
-            VALUES (@userId, @category, @amount, @month, CURRENT_TIMESTAMP)
-            ON CONFLICT(userId, category, month) 
+        await client.query('BEGIN'); // Start Transaction
+
+        const queryText = `
+            INSERT INTO budgets ("userId", category, amount, month, "updatedAt")
+            VALUES ($1, $2, $3, $4, NOW())
+            ON CONFLICT("userId", category, month) 
             DO UPDATE SET 
-                amount = excluded.amount,
-                updatedAt = CURRENT_TIMESTAMP
-        `);
+                amount = EXCLUDED.amount,
+                "updatedAt" = NOW()
+        `;
 
-        const updateMany = db.transaction((data) => {
-            for (const [category, amount] of Object.entries(data)) {
-                if (typeof amount !== 'number') continue;
+        for (const [category, amount] of Object.entries(formData)) {
+            // Ensure amount is a number
+            const val = parseFloat(amount);
+            if (isNaN(val)) continue;
 
-                stmt.run({
-                    userId: userId,
-                    category: category,
-                    amount: amount,
-                    month: currentMonth
-                });
-            }
-        });
+            await client.query(queryText, [userId, category, val, currentMonth]);
+        }
 
-        updateMany(formData);
+        await client.query('COMMIT'); // Commit Changes
 
         res.json({ 
             success: true, 
@@ -151,7 +162,10 @@ export const updateBudget = (req, res) => {
         });
 
     } catch (error) {
+        await client.query('ROLLBACK'); // Undo if error
         console.error("Update Budget Error:", error);
         res.status(500).json({ error: "Failed to update budget" });
+    } finally {
+        client.release(); // Release client back to pool
     }
 };
