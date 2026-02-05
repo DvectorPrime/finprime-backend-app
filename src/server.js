@@ -22,16 +22,19 @@ app.use(cors({
   credentials: true 
 }));
 
+app.set('trust proxy', 1);
+
 app.use(session({
   secret: process.env.SECRETS,
   resave: false,
   saveUninitialized: false,
   cookie: {
     httpOnly: true,
-    secure: false,
-    maxAge: 3600 * 60 * 60 * 24
+    secure: process.env.NODE_ENV === 'production', 
+    sameSite: process.env.NODE_ENV === 'production' ? 'lax' : 'lax', 
+    maxAge: 1000 * 60 * 60 * 24 
   },
-}))
+}));
 
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
