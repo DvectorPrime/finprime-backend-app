@@ -16,11 +16,13 @@ export const getInsight = async (req, res) => {
     try {
         // 1. CHECK CACHE
         // Changed: datetime('now') -> NOW()
+        const currentTime = new Date().toISOString();
+
         const cachedRes = await db.query(`
             SELECT content FROM ai_insights 
-            WHERE "userId" = $1 AND type = $2 AND "expiresAt" > NOW()
+            WHERE "userId" = $1 AND type = $2 AND "expiresAt" > $3
             ORDER BY "createdAt" DESC LIMIT 1
-        `, [userId, type]);
+        `, [userId, type, currentTime]);
 
         if (cachedRes.rows.length > 0) {
             console.log(`⚡ Serving cached ${type} insight`);
@@ -31,7 +33,7 @@ export const getInsight = async (req, res) => {
         const countRes = await db.query('SELECT COUNT(*) as count FROM transactions WHERE "userId" = $1', [userId]);
         
         // Postgres returns BigInt counts as strings, so we parse it
-        if (parseInt(countRes.rows[0].count) === 0) {
+        if (parseInt(countRes.rows[0].count) <= 7) {
             return res.json({ 
                 insight: "Welcome to FinPrime! Start adding your income and expenses to unlock personalized AI insights.", 
                 source: 'default' 

@@ -106,7 +106,6 @@ async function initDatabase() {
     `);
 
     // 8. User Sessions Table (Required for connect-pg-simple)
-    // ⚠️ This is the critical missing piece for Render!
     await db.query(`
       CREATE TABLE IF NOT EXISTS "user_sessions" (
         "sid" varchar NOT NULL COLLATE "default",
@@ -119,6 +118,16 @@ async function initDatabase() {
     // Create an index for faster session lookups
     await db.query(`
       CREATE INDEX IF NOT EXISTS "IDX_session_expire" ON "user_sessions" ("expire");
+    `);
+
+    // 9. Onboarded Users Table (New Addition) 🆕
+    await db.query(`
+      CREATE TABLE IF NOT EXISTS onboarded_users (
+        id SERIAL PRIMARY KEY,
+        "userId" INTEGER UNIQUE NOT NULL,
+        "completedAt" TIMESTAMP DEFAULT NOW(),
+        FOREIGN KEY("userId") REFERENCES users(id) ON DELETE CASCADE
+      );
     `);
 
     console.log('✅ PostgreSQL database initialized successfully!');
