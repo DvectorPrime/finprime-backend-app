@@ -2,7 +2,34 @@ import bcrypt from "bcryptjs";
 import { openDb } from "../db/database.js";
 import { sendEmail } from "../utils/emailService.js";
 
-// --- ME CONTROLLER (Check Session) ---
+// --- NEW: MARK ONBOARDED ---
+export async function markOnboarded(req, res) {
+    const userId = req.session.userId;
+
+    if (!userId) {
+        return res.status(401).json({ error: "Unauthorized" });
+    }
+
+    const db = openDb();
+
+    try {
+        // We use ON CONFLICT DO NOTHING so if they call this twice, it doesn't crash.
+        // It just ensures they are in the table.
+        await db.query(`
+            INSERT INTO onboarded_users ("userId") 
+            VALUES ($1) 
+            ON CONFLICT ("userId") DO NOTHING
+        `, [userId]);
+
+        return res.json({ success: true, message: "User marked as onboarded" });
+
+    } catch (err) {
+        console.error("Onboarding Error:", err);
+        return res.status(500).json({ error: "Failed to update onboarding status" });
+    }
+}
+
+// --- UPDATED: ME CONTROLLER ---
 export async function meController(req, res) {
     const db = openDb();
     const id = req.session.userId;
@@ -12,12 +39,16 @@ export async function meController(req, res) {
     }
 
     try {
+        // We added a LEFT JOIN to 'onboarded_users' (aliased as 'o')
+        // We check if o.id exists to determine if true/false
         const query = `
             SELECT 
                 u."firstName", u."lastName", u.email, u.avatar, u."googleId", u.password, 
-                s."themePreference", s.currency, s."aiInsights", s."budgetAlerts"
+                s."themePreference", s.currency, s."aiInsights", s."budgetAlerts",
+                o.id as "onboardedId"
             FROM users u
             LEFT JOIN settings s ON u.id = s."userId"
+            LEFT JOIN onboarded_users o ON u.id = o."userId"
             WHERE u.id = $1
         `;
 
@@ -40,7 +71,10 @@ export async function meController(req, res) {
                 aiInsights: data.aiInsights === true, 
                 budgetAlerts: data.budgetAlerts === true,
                 isGoogleAccount: !!data.googleId,
-                hasPassword: !!data.password && data.password.length > 0
+                hasPassword: !!data.password && data.password.length > 0,
+                
+                // New Property 👇
+                hasOnboarded: !!data.onboardedId // true if ID exists, false if null
             }
         });
     } catch (err) {
