@@ -64,6 +64,19 @@ app.use((err, req, res, next) => {
   res.status(500).json({ error: 'Something went wrong!' });
 });
 
+app.get('/health-db', async (req, res) => {
+  try {
+    const db = openDb();
+    await db.query('SELECT 1'); 
+    
+    console.log('💓 Heartbeat: Database is active.');
+    res.status(200).send('System Alive & Database Connected 🟢');
+  } catch (error) {
+    console.error('❌ Heartbeat Failed:', error);
+    res.status(500).send('Database Error');
+  }
+});
+
 // Start server
 app.listen(PORT, () => {
   console.log(`🚀 Server is running on http://localhost:${PORT}`);
