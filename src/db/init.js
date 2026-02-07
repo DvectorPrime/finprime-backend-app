@@ -1,10 +1,10 @@
-import { openDb, closeDb } from './database.js';
-import dotenv from 'dotenv';
+import { openDb, closeDb } from "./database.js";
+import dotenv from "dotenv";
 
 dotenv.config();
 
 async function initDatabase() {
-  console.log('🏗️  Initializing PostgreSQL database...');
+  console.log("🏗️  Initializing PostgreSQL database...");
 
   try {
     const db = openDb(); // This now returns the Postgres Pool
@@ -130,9 +130,20 @@ async function initDatabase() {
       );
     `);
 
-    console.log('✅ PostgreSQL database initialized successfully!');
+    // 10. Feedback Table 🗣️
+    await db.query(`
+      CREATE TABLE IF NOT EXISTS feedback (
+        id SERIAL PRIMARY KEY,
+        "userId" INTEGER, 
+        email TEXT NOT NULL,
+        message TEXT NOT NULL,
+        "createdAt" TIMESTAMP DEFAULT NOW(),
+        FOREIGN KEY("userId") REFERENCES users(id) ON DELETE SET NULL
+      );
+    `);
+    console.log("✅ PostgreSQL database initialized successfully!");
   } catch (err) {
-    console.error('❌ Error initializing database:', err);
+    console.error("❌ Error initializing database:", err);
     process.exit(1);
   } finally {
     closeDb();
