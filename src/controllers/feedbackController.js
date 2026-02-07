@@ -1,4 +1,4 @@
-import { openDb } from "../db/database";
+import { openDb } from "../db/database.js";
 
 export async function submitFeedback(req, res) {
     const db = openDb();
