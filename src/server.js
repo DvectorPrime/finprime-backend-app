@@ -21,13 +21,30 @@ const PORT = process.env.PORT || 8000;
 const PgSession = connectPgSimple(session)
 const db = openDb()
 
+const allowedOrigins = [
+  process.env.CLIENT_URL,                    // Production Frontend (set in Render)
+  "https://finprime.vercel.app"              // Fallback (Optional, but good safety net)
+].filter(Boolean);
+
 app.set('trust proxy', 1);
 
 // Middleware
+
 app.use(cors({
-  origin: 'http://localhost:3000', // Only allows your local frontend
+  origin: function (origin, callback) {
+    // Allow requests with no origin (like mobile apps or curl requests)
+    if (!origin) return callback(null, true);
+    
+    if (allowedOrigins.indexOf(origin) !== -1) {
+      callback(null, true);
+    } else {
+      console.log("Blocked by CORS:", origin); // Helpful for debugging
+      callback(new Error('Not allowed by CORS'));
+    }
+  },
+  credentials: true, // Crucial for cookies/sessions
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
-  credentials: true 
+  allowedHeaders: ['Content-Type', 'Authorization']
 }));
 
 
