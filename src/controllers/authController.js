@@ -223,7 +223,7 @@ export async function googleAuth(req, res) {
                 code,
                 client_id: process.env.GOOGLE_CLIENT_ID,
                 client_secret: process.env.GOOGLE_CLIENT_SECRET,
-                redirect_uri: 'http://localhost:3000/login',
+                redirect_uri: `${process.env.CLIENT_URL}/login`,
                 grant_type: 'authorization_code',
             })
         });
