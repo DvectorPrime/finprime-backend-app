@@ -11,6 +11,7 @@ import { budgetRouter } from './routes/budgetRouter.js';
 import { settingsRouter } from './routes/settingsRouter.js';
 import { uploadRouter } from './routes/uploadRouter.js';
 import { aiRouter } from './routes/aiRouter.js';
+import { feedbackRouter } from './routes/feedbackRouter.js';
 
 dotenv.config();
 
@@ -58,6 +59,7 @@ app.use('/budgets', budgetRouter)
 app.use('/settings', settingsRouter)
 app.use('/upload', uploadRouter)
 app.use('/ai-insight', aiRouter)
+app.use('/feedback', feedbackRouter)
 
 app.use((err, req, res, next) => {
   console.error(err.stack);
