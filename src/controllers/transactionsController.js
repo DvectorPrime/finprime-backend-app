@@ -117,7 +117,6 @@ export async function getAllTransactions(req, res) {
     };
 
     try {
-        // Updated to use await because getTransactions is now async
         const result = await getTransactions(userId, filters);
         res.json(result);
     } catch (err) {
@@ -150,7 +149,6 @@ export async function createTransaction(req, res) {
         const finalType = type.toUpperCase(); 
         const finalAmount = parseFloat(amount);
 
-        // Added RETURNING id to get the new row's ID immediately
         const result = await db.query(`
             INSERT INTO transactions ("userId", "transactionName", amount, type, category, notes, "createdAt")
             VALUES ($1, $2, $3, $4, $5, $6, $7)
@@ -182,7 +180,6 @@ export async function getMonthlyStats(req, res) {
         const startMetricsDate = new Date(today.getFullYear(), today.getMonth() - 5, 1);
         const startDateString = startMetricsDate.toISOString();
 
-        // Changed strftime (SQLite) to TO_CHAR (Postgres)
         const query = `
             SELECT 
                 TO_CHAR("createdAt", 'YYYY-MM') as "monthKey",
@@ -202,7 +199,7 @@ export async function getMonthlyStats(req, res) {
             if (!dataMap[row.monthKey]) {
                 dataMap[row.monthKey] = { income: 0, expense: 0 };
             }
-            // Parse float here because total is a string in Postgres
+
             const val = parseFloat(row.total);
             
             if (row.type === 'INCOME') {

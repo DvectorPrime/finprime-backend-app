@@ -15,7 +15,6 @@ export const getInsight = async (req, res) => {
 
     try {
         // 1. CHECK CACHE
-        // Changed: datetime('now') -> NOW()
         const currentTime = new Date().toISOString();
 
         const cachedRes = await db.query(`
@@ -32,7 +31,7 @@ export const getInsight = async (req, res) => {
         // 2. CHECK GLOBAL DATA (If user has 0 transactions, don't waste AI tokens)
         const countRes = await db.query('SELECT COUNT(*) as count FROM transactions WHERE "userId" = $1', [userId]);
         
-        // Postgres returns BigInt counts as strings, so we parse it
+
         if (parseInt(countRes.rows[0].count) <= 7) {
             return res.json({ 
                 insight: "Welcome to FinPrime! Start adding your income and expenses to unlock personalized AI insights.", 
@@ -45,8 +44,7 @@ export const getInsight = async (req, res) => {
         let contextData = {};
 
         if (type === 'DASHBOARD') {
-            // Dashboard: Last 30 days
-            // Changed: date('now', '-30 days') -> NOW() - INTERVAL '30 days'
+           
             const txRes = await db.query(`
                 SELECT "transactionName", amount, type, category, "createdAt" 
                 FROM transactions 
@@ -57,7 +55,6 @@ export const getInsight = async (req, res) => {
             const rawTxs = txRes.rows;
 
             const summary = rawTxs.reduce((acc, curr) => {
-                // Ensure amount is a number (Postgres DECIMAL comes back as string)
                 const val = parseFloat(curr.amount);
                 if (curr.type === 'INCOME') acc.totalIncome += val;
                 if (curr.type === 'EXPENSE') acc.totalExpense += val;
@@ -103,7 +100,6 @@ export const getInsight = async (req, res) => {
             `, [userId, current.start, current.end]);
             
             // 4. Get Expenses (Last Month for comparison)
-            // Note: I simplified the query to match txRes1 logic
             const txRes2 = await db.query(`
                 SELECT "transactionName", amount, category, "createdAt" 
                 FROM transactions 
@@ -111,7 +107,7 @@ export const getInsight = async (req, res) => {
                 AND type = 'EXPENSE' 
                 AND "createdAt" > $2 AND "createdAt" <= $3
                 ORDER BY amount DESC
-            `, [userId, last.start, current.end]); // Fixed logic to use last.start/end
+            `, [userId, last.start, current.end]);
             
             const rawTxs = txRes1.rows;
             const rawTxs2 = txRes2.rows;

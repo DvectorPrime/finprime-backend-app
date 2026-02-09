@@ -9,7 +9,6 @@ export const uploadAvatar = async (req, res) => {
     api_secret: process.env.CLOUDINARY_API_SECRET,
   });
 
-  // Check if a file was actually sent
   if (!req.file) {
     return res.status(400).json({ error: "No image file provided" });
   }
@@ -20,7 +19,7 @@ export const uploadAvatar = async (req, res) => {
   }
 
   try {
-    // 2. Define the Upload Logic (Stream Buffer -> Cloudinary)
+    // 2. Upload Logic (Stream Buffer -> Cloudinary)
     const streamUpload = (fileBuffer) => {
       return new Promise((resolve, reject) => {
         const stream = cloudinary.uploader.upload_stream(
@@ -52,8 +51,6 @@ export const uploadAvatar = async (req, res) => {
     // 4. Update Database (PostgreSQL)
     const db = openDb();
     
-    // Changed: prepare/run -> await db.query
-    // Changed: ? -> $1, $2
     await db.query(
       "UPDATE users SET avatar = $1 WHERE id = $2",
       [avatarUrl, userId]
@@ -61,7 +58,6 @@ export const uploadAvatar = async (req, res) => {
 
     console.log(`Avatar updated for user ${userId}: ${avatarUrl}`);
 
-    // 5. Send back the new URL
     res.json({ success: true, avatarUrl });
   } catch (error) {
     console.error("Upload failed:", error);

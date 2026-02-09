@@ -34,7 +34,7 @@ export async function sendEmail(email, firstName, code, type) {
     `;
 
   const emailData = {
-    sender: { email: "nwachukwuvictor2008@gmail.com", name: "FinPrime" }, 
+    sender: { email: process.env.EMAIL_FROM, name: "FinPrime" }, 
     to: [{ email: email }],
     subject: subject,
     htmlContent: htmlBody,

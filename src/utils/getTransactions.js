@@ -7,7 +7,6 @@ export async function getTransactions(userId, filters) {
 
     // --- SCENARIO 1: RECENT ONLY (Dashboard) ---
     if (filters.recentOnly) {
-        // Change ? to $1
         const res = await db.query(`
             SELECT id, "transactionName", amount, type, category, notes, "createdAt" 
             FROM transactions 
@@ -24,11 +23,9 @@ export async function getTransactions(userId, filters) {
 
     // --- SCENARIO 2: FILTERED LIST ---
     
-    // Start with the base condition (User ID is always $1)
     const conditions = [`"userId" = $1`];
     const params = [userId];
 
-    // Helper to get the next placeholder number (e.g., $2, $3...)
     const nextParam = () => `$${params.length + 1}`;
 
     // A. Type Filter
@@ -45,16 +42,13 @@ export async function getTransactions(userId, filters) {
 
     // C. Search Filter
     if (filters.search) {
-        // We need two placeholders for the same search term
-        const p1 = nextParam(); // e.g. $3
-        // We push the term first so params.length increases for the next call
+        const p1 = nextParam();
         params.push(`%${filters.search}%`); 
         
-        const p2 = nextParam(); // e.g. $4
+        const p2 = nextParam(); 
         params.push(`%${filters.search}%`);
 
         conditions.push(`("transactionName" ILIKE ${p1} OR notes ILIKE ${p2})`);
-        // Note: ILIKE is Postgres specific. It means "Case Insensitive Like" (matches "food" and "Food")
     }
 
     // D. Date Filter (Month & Year)
@@ -94,14 +88,12 @@ export async function getTransactions(userId, filters) {
     const summaryRes = await db.query(summaryQuery, params);
     const summaryRow = summaryRes.rows[0];
 
-    // Parse Postgres results (SUM returns string or null)
     const totalIncome = parseFloat(summaryRow.totalIncome) || 0;
     const totalExpense = parseFloat(summaryRow.totalExpense) || 0;
 
     // 3. GET DATA (With Pagination)
     const offset = (safePage - 1) * PAGE_SIZE;
     
-    // Add LIMIT and OFFSET to params
     const limitParam = nextParam();
     params.push(PAGE_SIZE);
     
