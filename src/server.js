@@ -21,14 +21,13 @@ const PORT = process.env.PORT || 8000;
 const PgSession = connectPgSimple(session);
 const db = openDb();
 
-// 1. TRUST PROXY (Critical for Render & Safari Cookies)
 app.set('trust proxy', 1);
 
-// 2. ROBUST CORS SETUP
+// ROBUST CORS SETUP
 const allowedOrigins = [
   "http://localhost:3000",
-  process.env.CLIENT_URL,          // Your main Vercel URL from Render Env
-  "https://finprime.vercel.app"    // Fallback
+  process.env.CLIENT_URL,          
+  "https://finprime.vercel.app"    
 ].filter(Boolean);
 
 app.use(cors({
@@ -36,7 +35,7 @@ app.use(cors({
     // Allow requests with no origin (like mobile apps or curl requests)
     if (!origin) return callback(null, true);
 
-    // Check if origin is in our allowed list OR if it is a Vercel Preview URL
+    
     if (allowedOrigins.indexOf(origin) !== -1 || origin.endsWith(".vercel.app")) {
       callback(null, true);
     } else {
@@ -49,7 +48,6 @@ app.use(cors({
   allowedHeaders: ['Content-Type', 'Authorization']
 }));
 
-// 3. SESSION WITH SAFARI FIX
 app.use(session({
   store: new PgSession({
     pool: db,
@@ -60,16 +58,11 @@ app.use(session({
   resave: false,
   saveUninitialized: false,
   
-  // ⚠️ CRITICAL PROXY SETTING
   proxy: true, 
 
   cookie: {
-    maxAge: 1000 * 60 * 60 * 24 * 7, // 7 Days
+    maxAge: 1000 * 60 * 60 * 24 * 2, 
     httpOnly: true,
-    
-    // Secure & SameSite logic
-    // If in Production (Render), use 'true' and 'none'.
-    // If in Dev (Localhost), use 'false' and 'lax'.
     secure: process.env.NODE_ENV === 'production', 
     sameSite: process.env.NODE_ENV === 'production' ? 'none' : 'lax' 
   }

@@ -2,7 +2,6 @@ import bcrypt from "bcryptjs";
 import { openDb } from "../db/database.js";
 import { sendEmail } from "../utils/emailService.js";
 
-// --- NEW: MARK ONBOARDED ---
 export async function markOnboarded(req, res) {
     const userId = req.session.userId;
 
@@ -13,8 +12,6 @@ export async function markOnboarded(req, res) {
     const db = openDb();
 
     try {
-        // We use ON CONFLICT DO NOTHING so if they call this twice, it doesn't crash.
-        // It just ensures they are in the table.
         await db.query(`
             INSERT INTO onboarded_users ("userId") 
             VALUES ($1) 
@@ -29,7 +26,6 @@ export async function markOnboarded(req, res) {
     }
 }
 
-// --- UPDATED: ME CONTROLLER ---
 export async function meController(req, res) {
     const db = openDb();
     const id = req.session.userId;
@@ -39,8 +35,6 @@ export async function meController(req, res) {
     }
 
     try {
-        // We added a LEFT JOIN to 'onboarded_users' (aliased as 'o')
-        // We check if o.id exists to determine if true/false
         const query = `
             SELECT 
                 u."firstName", u."lastName", u.email, u.avatar, u."googleId", u.password, 
@@ -83,7 +77,6 @@ export async function meController(req, res) {
     }
 }
 
-// --- LOGIN ---
 export async function login(req, res) {
     const db = openDb();
     const { email, password } = req.body;
@@ -119,7 +112,7 @@ export async function login(req, res) {
     }
 }
 
-// --- REGISTER ---
+
 export async function register(req, res) {
     const db = openDb();
     let { firstName, lastName, email, password, code } = req.body;
@@ -130,7 +123,6 @@ export async function register(req, res) {
 
     try {
         // 1. VERIFICATION STEP
-        // FIX: Replaced NOW() with $3 (currentTime) to ensure timezone consistency
         const currentTime = new Date().toISOString();
         
         const codeRes = await db.query(`
@@ -179,7 +171,6 @@ export async function register(req, res) {
     }
 }
 
-// --- SEND CODE ---
 export async function sendRegistrationCode(req, res) {
     const { email, firstName } = req.body;
     const db = openDb();
@@ -209,7 +200,6 @@ export async function sendRegistrationCode(req, res) {
     }
 }
 
-// --- GOOGLE AUTH ---
 export async function googleAuth(req, res) {
     const { code } = req.body;
     const db = openDb();
@@ -284,14 +274,13 @@ export async function googleAuth(req, res) {
     }
 }
 
-// --- LOGOUT ---
+
 export async function logOutUser(req, res) {
     req.session.destroy(() => {
         res.json({ message: 'Logged out' });
     });
 }
 
-// --- CHANGE PASSWORD ---
 export const changePassword = async (req, res) => {
     const { currentPassword, newPassword } = req.body;
     const userId = req.session.userId;
@@ -332,7 +321,6 @@ export const changePassword = async (req, res) => {
     }
 };
 
-// --- FORGOT PASSWORD ---
 export const forgotPassword = async (req, res) => {
     const { email } = req.body;
     if (!email) return res.status(400).json({ error: "Email is required." });
@@ -381,7 +369,6 @@ export const resetPasswordWithPin = async (req, res) => {
 
     try {
         // 1. Verify Code
-        // FIX: Replaced NOW() with $3 (currentTime) to ensure timezone consistency
         const currentTime = new Date().toISOString();
 
         const codeRes = await db.query(`
@@ -412,7 +399,6 @@ export const resetPasswordWithPin = async (req, res) => {
     }
 };
 
-// --- DELETE ACCOUNT ---
 export const deleteAccount = async (req, res) => {
     const { password } = req.body;
     const userId = req.session.userId;

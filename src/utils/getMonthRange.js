@@ -12,11 +12,8 @@ export function getMonthDateRange(offset = 0) {
   // "Jan" format for the Chart Label
   const label = targetDate.toLocaleString('default', { month: 'short' });
 
-  // Start of month (e.g., 2026-01-01T00:00:00.000Z)
   const start = new Date(year, month, 0, 0, 0, 0).toISOString();
   
-  // End of month (e.g., 2026-01-31T23:59:59.999Z)
-  // We go to the 0th day of the NEXT month to get the last day of THIS month
   const end = new Date(year, month + 1, -1, 24, 0, 0).toISOString();
 
   return { monthKey, label, start, end };

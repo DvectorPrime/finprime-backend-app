@@ -4,7 +4,6 @@ import dotenv from 'dotenv';
 
 dotenv.config();
 
-// Helpers for Random Data
 const incomeCategories = ['Salary', 'Business', 'Investments', 'Gifts', 'Others'];
 const expenseCategories = ['Housing', 'Food', 'Transport', 'Shopping', 'Subscriptions', 'Others'];
 
@@ -47,7 +46,6 @@ function getRandomAmount(min, max) {
   return (Math.random() * (max - min) + min).toFixed(2);
 }
 
-// 🆕 Helper to Create Transaction (Async for Postgres)
 async function createRandomTransaction(db, userId, period) {
   const isIncome = Math.random() > 0.75;
   const type = isIncome ? 'INCOME' : 'EXPENSE';
@@ -91,7 +89,6 @@ async function seedDatabase() {
   ];
 
   for (const user of users) {
-    // Postgres doesn't have "INSERT OR IGNORE", so we use "ON CONFLICT DO NOTHING"
     const res = await db.query(`
       INSERT INTO users (email, password, "firstName", "lastName", avatar) 
       VALUES ($1, $2, $3, $4, $5)
@@ -120,7 +117,6 @@ async function seedDatabase() {
     for (const monthKey of monthsToSeed) {
         for (const category of expenseCategories) {
             const amount = getRandomAmount(50000, 150000); 
-            // Postgres "UPSERT" syntax
             await db.query(`
               INSERT INTO budgets ("userId", category, amount, month)
               VALUES ($1, $2, $3, $4)
@@ -137,7 +133,6 @@ async function seedDatabase() {
 
   for (const user of allUsers) {
     console.log(`   -> Generating data for ${user.email}...`);
-    // We use await in loop to ensure they are inserted in order (safest for scripts)
     for (let i = 0; i < 35; i++) {
       await createRandomTransaction(db, user.id, 'CURRENT_MONTH');
     }
@@ -150,7 +145,6 @@ async function seedDatabase() {
   console.log('⚙️  Seeding user settings...');
   
   for (const user of allUsers) {
-    // Using TRUE/FALSE for booleans instead of 1/0
     await db.query(`
       INSERT INTO settings ("userId", "themePreference", currency, "aiInsights", "budgetAlerts")
       VALUES ($1, 'System', 'NGN', TRUE, FALSE)

@@ -32,10 +32,8 @@ export const getSettings = async (req, res) => {
             return res.status(404).json({ error: "User not found" });
         }
 
-        // Postgres returns actual Booleans, so we don't need to convert 1/0
         const formattedData = {
             ...data,
-            // Ensure defaults if null
             aiInsights: data.aiInsights ?? true, 
             budgetAlerts: data.budgetAlerts ?? false,
             themePreference: data.themePreference || 'System',
@@ -63,14 +61,13 @@ export const updateSettings = async (req, res) => {
 
     const db = openDb();
     
-    // ⚠️ Get a dedicated client for the transaction
     const client = await db.connect();
 
     const userFields = ['firstName', 'lastName', 'avatar'];
     const settingFields = ['themePreference', 'currency', 'aiInsights', 'budgetAlerts'];
 
     try {
-        await client.query('BEGIN'); // Start Transaction
+        await client.query('BEGIN');
 
         // --- 1. UPDATE USERS TABLE ---
         const userUpdates = [];
@@ -86,10 +83,9 @@ export const updateSettings = async (req, res) => {
         }
 
         if (userUpdates.length > 0) {
-            // Add Timestamp
             userUpdates.push(`"updatedAt" = NOW()`);
+
             
-            // Add ID for WHERE clause
             userValues.push(userId);
             
             const sql = `UPDATE users SET ${userUpdates.join(', ')} WHERE id = $${uIdx}`;
@@ -99,12 +95,12 @@ export const updateSettings = async (req, res) => {
         // --- 2. UPDATE SETTINGS TABLE ---
         const settingUpdates = [];
         const settingValues = [];
-        let sIdx = 1; // Reset counter for new query
+        let sIdx = 1;
 
         for (const key of Object.keys(updates)) {
             if (settingFields.includes(key)) {
                 settingUpdates.push(`"${key}" = $${sIdx}`);
-                settingValues.push(updates[key]); // Postgres handles boolean true/false automatically
+                settingValues.push(updates[key]); 
                 sIdx++;
             }
         }
@@ -116,7 +112,6 @@ export const updateSettings = async (req, res) => {
             const sql = `UPDATE settings SET ${settingUpdates.join(', ')} WHERE "userId" = $${sIdx}`;
             const info = await client.query(sql, settingValues);
 
-            // Edge Case: Settings row might not exist (though init/auth should have created it)
             if (info.rowCount === 0) {
                  console.warn(`Warning: No settings found for user ${userId}`);
             }
@@ -129,13 +124,12 @@ export const updateSettings = async (req, res) => {
         await client.query('ROLLBACK'); // Rollback on error
         console.error("Settings Update Error:", error);
 
-        // Postgres Error Code 23505 is Unique Violation
         if (error.code === '23505') {
             return res.status(409).json({ error: "Email already in use" });
         }
 
         res.status(500).json({ error: "Failed to update settings" });
     } finally {
-        client.release(); // Release client back to pool
+        client.release(); 
     }
 };

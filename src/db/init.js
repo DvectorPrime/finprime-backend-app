@@ -7,7 +7,7 @@ async function initDatabase() {
   console.log("🏗️  Initializing PostgreSQL database...");
 
   try {
-    const db = openDb(); // This now returns the Postgres Pool
+    const db = openDb();
 
     // 1. Users Table
     await db.query(`
