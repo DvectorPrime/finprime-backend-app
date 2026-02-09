@@ -217,12 +217,13 @@ I'm open to contributions! To contribute:
 
 ## 🐛 Known Issues
 
-- **Session Issues on Safari/iOS:** If experiencing session persistence issues on localhost, ensure cookies are set with proper `sameSite` and `secure` flags in production.
-- **CORS Errors:** If frontend is deployed on Vercel preview URLs, ensure `CLIENT_URL` includes the preview domain.
+- **Session Issues on Safari/iOS:** If experiencing session persistence issues on localhost, ensure cookies are set with proper `sameSite` and `secure` is `none` flags in development.
 
 ## 📄 License
 
-Distributed under the MIT License. See `LICENSE` for more information.
+This project is distributed under a **custom license** for educational and contribution purposes only. Commercial and personal use is **strictly prohibited**.
+
+See `LICENSE` for more information.
 
 ## 🙏 Acknowledgments
 
