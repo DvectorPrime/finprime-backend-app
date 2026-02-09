@@ -47,9 +47,7 @@ async function viewDb() {
       
       let query;
 
-      // Smart Column Selection
       if (tableName === 'users') {
-        // Exclude password for cleaner view
         query = `SELECT id, email, "firstName", "lastName", avatar, "googleId", "createdAt" FROM ${tableName}`;
       } else {
         // Fallback for other tables (select everything)

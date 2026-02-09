@@ -32,13 +32,12 @@ export const getBudgetOverview = async (req, res) => {
             GROUP BY category
         `, [userId, current.start, current.end]);
 
-        // Map the results (Parse float because Postgres returns SUM as string)
         const expenseMap = new Map(expensesRes.rows.map(e => [e.category, parseFloat(e.total)]));
 
         let totalBudget = 0;
         
         const categoryData = budgets.map((b) => {
-            const budgetAmount = parseFloat(b.amount); // Ensure number
+            const budgetAmount = parseFloat(b.amount);
             const spent = expenseMap.get(b.category) || 0;
             totalBudget += budgetAmount;
 
@@ -67,8 +66,6 @@ export const getBudgetOverview = async (req, res) => {
         // 4. Build Chart Data (History)
         const chartData = [];
 
-        // Loop through last 6 months
-        // We use a regular for-loop with await to keep it simple and sequential
         for (let i = 5; i >= 0; i--) {
             const range = getMonthDateRange(i);
 
@@ -129,12 +126,10 @@ export const updateBudget = async (req, res) => {
     const db = openDb();
     const currentMonth = getCurrentMonthKey();
     
-    // ⚠️ TRANSACTION HANDLING FOR POSTGRES
-    // We need a specific client from the pool to run a transaction
     const client = await db.connect();
 
     try {
-        await client.query('BEGIN'); // Start Transaction
+        await client.query('BEGIN'); 
 
         const queryText = `
             INSERT INTO budgets ("userId", category, amount, month, "updatedAt")
@@ -146,14 +141,13 @@ export const updateBudget = async (req, res) => {
         `;
 
         for (const [category, amount] of Object.entries(formData)) {
-            // Ensure amount is a number
             const val = parseFloat(amount);
             if (isNaN(val)) continue;
 
             await client.query(queryText, [userId, category, val, currentMonth]);
         }
 
-        await client.query('COMMIT'); // Commit Changes
+        await client.query('COMMIT');
 
         res.json({ 
             success: true, 
